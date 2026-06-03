@@ -1,0 +1,992 @@
+@import url("./colors_and_type.css");
+
+/* ============================================================
+   Task Timer — window styles (dark, 460×680 desktop app)
+   Namespaced under .tt to avoid collisions.
+   ============================================================ */
+
+.tt {
+  /* running accent — green ("recording / live") */
+  --run:            oklch(0.74 0.18 152);
+  --run-dim:        oklch(0.74 0.18 152 / 0.16);
+  --run-line:       oklch(0.74 0.18 152 / 0.45);
+  --run-glow:       oklch(0.74 0.18 152 / 0.22);
+  --stop:           var(--destructive);
+
+  width: 460px;
+  height: 680px;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: "Geist", "Noto Sans JP", system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+  border-radius: 8px;
+  -webkit-font-smoothing: antialiased;
+}
+.tt *, .tt *::before, .tt *::after { box-sizing: border-box; }
+.tt .mono { font-family: "Geist Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+
+/* ---- Title bar (Windows-style, custom dark chrome) ---- */
+.tt-titlebar {
+  height: 38px;
+  flex: 0 0 38px;
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 8px;
+  padding: 0 6px 0 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--card);
+  -webkit-app-region: drag;
+}
+.tt-titlebar .app-mark {
+  width: 18px; height: 18px;
+  border-radius: 5px;
+  background: var(--run);
+  display: grid; place-items: center;
+  color: #04140b;
+  flex: 0 0 auto;
+}
+.tt-titlebar .app-mark svg { width: 12px; height: 12px; }
+.tt-title { font-size: 12.5px; font-weight: 600; letter-spacing: -0.01em; color: var(--foreground); white-space: nowrap; }
+.tt-title .ver { color: var(--muted-foreground); font-weight: 400; margin-left: 4px; font-size: 11px; }
+.tt-wincontrols { margin-left: auto; display: flex; gap: 2px; }
+.tt-wincontrols button {
+  width: 30px; height: 26px;
+  border: 0; background: transparent;
+  color: var(--muted-foreground);
+  border-radius: 6px;
+  display: grid; place-items: center;
+  cursor: pointer;
+}
+.tt-wincontrols button:hover { background: var(--muted); color: var(--foreground); }
+.tt-wincontrols button.close:hover { background: var(--destructive); color: #fff; }
+.tt-wincontrols svg { width: 14px; height: 14px; }
+
+/* ---- Status header (date + tray indicator) ---- */
+.tt-statusbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 11px 16px 9px;
+}
+.tt-date { font-size: 12.5px; color: var(--muted-foreground); display: flex; align-items: center; gap: 7px; }
+.tt-date .dow { color: var(--foreground); font-weight: 500; }
+.tt-tray {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11.5px; font-weight: 500;
+  padding: 3px 9px 3px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted-foreground);
+  background: var(--card);
+}
+.tt-tray .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted-foreground); }
+.tt-tray.live { color: var(--run); border-color: var(--run-line); background: var(--run-dim); }
+.tt-tray.live .dot { background: var(--run); box-shadow: 0 0 0 0 var(--run-glow); animation: ttpulse 1.8s ease-out infinite; }
+@keyframes ttpulse { 0% { box-shadow: 0 0 0 0 var(--run-glow); } 70% { box-shadow: 0 0 0 7px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+
+/* ---- Generic scroll body ---- */
+.tt-body { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+.tt-list { flex: 1 1 auto; overflow: hidden; padding: 0 12px; }
+
+/* ---- Section label row ---- */
+.tt-sec {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 4px 8px;
+}
+.tt-sec .lbl { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted-foreground); white-space: nowrap; }
+.tt-sec .lbl .count { color: var(--foreground); margin-left: 4px; }
+.tt-newbtn {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11.5px; font-weight: 500;
+  color: var(--muted-foreground);
+  background: transparent; border: 1px solid var(--border);
+  padding: 3px 8px; border-radius: var(--radius-md); cursor: pointer;
+}
+.tt-newbtn:hover { color: var(--foreground); border-color: var(--ring); background: var(--muted); }
+.tt-newbtn svg { width: 12px; height: 12px; }
+.tt-newbtn kbd { font-size: 9.5px; }
+
+/* ---- kbd chips ---- */
+.tt kbd {
+  font-family: "Geist Mono", monospace;
+  font-size: 10px; line-height: 1;
+  padding: 2px 5px;
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+
+/* ---- Task rows ---- */
+.tt-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+.tt-row + .tt-row { margin-top: 2px; }
+.tt-row.has-num { grid-template-columns: auto auto 1fr auto; }
+.tt-row:hover { background: var(--muted); }
+.tt-row .swatch { width: 4px; align-self: stretch; min-height: 30px; border-radius: 999px; flex: 0 0 4px; }
+.tt-rmain { min-width: 0; }
+.tt-rtop { display: flex; align-items: center; gap: 7px; }
+.tt-rname { font-size: 13.5px; font-weight: 500; color: var(--foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tt-tag {
+  font-size: 10px; font-weight: 500;
+  padding: 1px 7px; border-radius: 999px;
+  background: var(--secondary); color: var(--muted-foreground);
+  border: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+.tt-rmeta { display: flex; align-items: center; gap: 8px; margin-top: 3px; font-size: 11px; color: var(--muted-foreground); }
+.tt-rmeta .sep { width: 2px; height: 2px; border-radius: 50%; background: var(--muted-foreground); opacity: 0.5; }
+.tt-rright { display: flex; align-items: center; gap: 10px; }
+.tt-rtime { text-align: right; }
+.tt-rtime .t { font-size: 13px; font-weight: 600; color: var(--foreground); }
+.tt-rtime .l { font-size: 9.5px; color: var(--muted-foreground); text-transform: uppercase; letter-spacing: 0.04em; }
+
+/* number-key badge */
+.tt-numkey {
+  width: 18px; height: 18px; flex: 0 0 18px;
+  display: grid; place-items: center;
+  font-family: "Geist Mono", monospace; font-size: 10px; font-weight: 600;
+  border-radius: 5px; background: var(--muted); color: var(--muted-foreground);
+  border: 1px solid var(--border);
+}
+
+/* row actions (hover) */
+.tt-acts { display: flex; align-items: center; gap: 2px; }
+.tt-acts button {
+  width: 26px; height: 26px; border: 0; background: transparent;
+  color: var(--muted-foreground); border-radius: 6px; cursor: pointer;
+  display: grid; place-items: center;
+}
+.tt-acts button:hover { background: var(--accent); color: var(--foreground); }
+.tt-acts button.play:hover { background: var(--run-dim); color: var(--run); }
+.tt-acts button.del:hover { background: oklch(0.704 0.191 22.216 / 0.18); color: var(--destructive); }
+.tt-acts svg { width: 14px; height: 14px; }
+
+/* selected / running / done states */
+.tt-row.selected { border-color: var(--ring); background: var(--muted); }
+.tt-row.running {
+  border-color: var(--run-line);
+  background: var(--run-dim);
+}
+.tt-row.running .tt-rname { color: var(--run); }
+.tt-row.running .tt-rtime .t { color: var(--run); }
+.tt-row.done .tt-rname { color: var(--muted-foreground); text-decoration: line-through; }
+.tt-row.done { opacity: 0.6; }
+
+.tt-mini-live {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 10px; color: var(--run); font-weight: 600;
+}
+.tt-mini-live .bar { display: inline-flex; gap: 1.5px; align-items: flex-end; height: 10px; }
+.tt-mini-live .bar i { width: 2px; background: var(--run); border-radius: 1px; animation: ttbar 0.9s ease-in-out infinite; }
+.tt-mini-live .bar i:nth-child(1){height:5px; animation-delay:0s;}
+.tt-mini-live .bar i:nth-child(2){height:10px; animation-delay:.15s;}
+.tt-mini-live .bar i:nth-child(3){height:7px; animation-delay:.3s;}
+@keyframes ttbar { 0%,100%{transform:scaleY(0.4);} 50%{transform:scaleY(1);} }
+
+/* ---- Footer ---- */
+.tt-footer {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--border);
+  background: var(--card);
+  padding: 8px 12px;
+  display: flex; align-items: center; gap: 10px;
+}
+.tt-hints { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 10.5px; color: var(--muted-foreground); }
+.tt-hint { display: inline-flex; align-items: center; gap: 4px; }
+.tt-fspace { margin-left: auto; }
+.tt-ficons { display: flex; gap: 2px; }
+.tt-ficons button {
+  width: 28px; height: 28px; border: 0; background: transparent;
+  color: var(--muted-foreground); border-radius: 6px; cursor: pointer;
+  display: grid; place-items: center;
+}
+.tt-ficons button:hover { background: var(--muted); color: var(--foreground); }
+.tt-ficons svg { width: 15px; height: 15px; }
+
+/* ---- Empty state ---- */
+.tt-empty { flex: 1 1 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 24px 28px; gap: 4px; }
+.tt-empty .ico { width: 46px; height: 46px; border-radius: 14px; display: grid; place-items: center; background: var(--muted); color: var(--muted-foreground); margin-bottom: 12px; }
+.tt-empty .ico svg { width: 22px; height: 22px; }
+.tt-empty h3 { font-size: 15px; font-weight: 600; margin: 0; color: var(--foreground); }
+.tt-empty p { font-size: 12.5px; color: var(--muted-foreground); margin: 2px 0 16px; max-width: 240px; }
+.tt-empty .cta-row { display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 230px; }
+
+/* ---- Buttons (primary timer controls) ---- */
+.tt-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  font-family: inherit; font-size: 14px; font-weight: 600;
+  border-radius: var(--radius-md); border: 1px solid transparent;
+  cursor: pointer; padding: 10px 16px; line-height: 1; white-space: nowrap;
+}
+.tt-btn svg { width: 16px; height: 16px; }
+.tt-btn-run { background: var(--run); color: #04140b; }
+.tt-btn-run:hover { filter: brightness(1.05); }
+.tt-btn-stop { background: var(--stop); color: #fff; }
+.tt-btn-stop:hover { filter: brightness(1.05); }
+.tt-btn-ghost { background: transparent; color: var(--foreground); border-color: var(--border); }
+.tt-btn-ghost:hover { background: var(--muted); }
+.tt-btn-sec { background: var(--secondary); color: var(--secondary-foreground); }
+.tt-btn-sec:hover { filter: brightness(1.08); }
+.tt-btn.block { width: 100%; }
+
+/* =====================================================
+   DIRECTION A — Classic stack
+   ===================================================== */
+.tt-a-timer {
+  margin: 4px 16px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--card);
+  padding: 18px 18px 16px;
+}
+.tt-a-timer.live { border-color: var(--run-line); box-shadow: 0 0 0 1px var(--run-line), 0 0 40px -16px var(--run-glow); }
+.tt-a-curlbl { font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted-foreground); }
+.tt-a-curtask { display: flex; align-items: center; gap: 8px; margin-top: 7px; }
+.tt-a-curtask .dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
+.tt-a-curtask { flex-wrap: nowrap; }
+.tt-a-curtask .nm { font-size: 15px; font-weight: 600; color: var(--foreground); white-space: nowrap; }
+.tt-a-big { font-family: "Geist Mono", monospace; font-variant-numeric: tabular-nums; font-size: 52px; font-weight: 600; letter-spacing: -0.02em; line-height: 1; margin: 14px 0 16px; color: var(--foreground); }
+.tt-a-big.idle { color: var(--muted-foreground); opacity: 0.55; }
+.tt-a-big.live { color: var(--run); }
+.tt-a-big .ms { font-size: 24px; opacity: 0.6; }
+.tt-a-ctrlrow { display: flex; align-items: center; gap: 10px; }
+.tt-a-total { display: flex; align-items: center; justify-content: space-between; margin: 0 16px 6px; padding: 9px 14px; border-radius: var(--radius-md); background: var(--secondary); }
+.tt-a-total .l { font-size: 12px; color: var(--muted-foreground); }
+.tt-a-total .v { font-family: "Geist Mono", monospace; font-variant-numeric: tabular-nums; font-size: 15px; font-weight: 600; }
+
+/* =====================================================
+   DIRECTION B — Focus hero
+   ===================================================== */
+.tt-b-hero {
+  margin: 0; padding: 26px 20px 22px;
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  border-bottom: 1px solid var(--border);
+  position: relative;
+}
+.tt-b-hero.live { background: radial-gradient(120% 90% at 50% 0%, var(--run-dim), transparent 70%); }
+.tt-b-task { display: inline-flex; align-items: center; gap: 8px; padding: 4px 6px 4px 9px; border-radius: 999px; border: 1px solid var(--border); background: var(--card); white-space: nowrap; max-width: 92%; }
+.tt-b-task .dot { width: 8px; height: 8px; border-radius: 50%; }
+.tt-b-task .nm { font-size: 13px; font-weight: 600; flex: 0 1 auto; max-width: 240px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tt-b-task .tag { font-size: 10px; color: var(--muted-foreground); }
+.tt-b-task .tt-b-editbtn { margin-left: 2px; width: 22px; height: 22px; }
+.tt-b-big { font-family: "Geist Mono", monospace; font-variant-numeric: tabular-nums; font-size: 66px; font-weight: 600; letter-spacing: -0.03em; line-height: 1; margin: 18px 0 6px; }
+.tt-b-big.idle { color: var(--muted-foreground); opacity: 0.5; }
+.tt-b-big.live { color: var(--run); text-shadow: 0 0 30px var(--run-glow); }
+.tt-b-sub { font-size: 11.5px; color: var(--muted-foreground); display: flex; gap: 14px; margin-bottom: 20px; white-space: nowrap; }
+.tt-b-sub b { color: var(--foreground); font-weight: 600; }
+.tt-b-cta { display: flex; gap: 10px; width: 100%; }
+.tt-b-fab {
+  width: 64px; height: 64px; border-radius: 50%; border: 0; cursor: pointer;
+  display: grid; place-items: center; flex: 0 0 auto;
+}
+.tt-b-fab svg { width: 26px; height: 26px; }
+
+/* =====================================================
+   DIRECTION C — Dense command bar
+   ===================================================== */
+.tt-c-bar {
+  margin: 4px 12px 8px;
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--card);
+}
+.tt-c-bar.live { border-color: var(--run-line); background: var(--run-dim); }
+.tt-c-bar .pp { width: 38px; height: 38px; border-radius: 9px; border: 0; cursor: pointer; display: grid; place-items: center; flex: 0 0 auto; }
+.tt-c-bar .pp svg { width: 18px; height: 18px; }
+.tt-c-info { min-width: 0; flex: 1 1 auto; }
+.tt-c-info .nm { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tt-c-info .nm.idle { color: var(--muted-foreground); font-weight: 500; }
+.tt-c-info .sub { font-size: 10.5px; color: var(--muted-foreground); margin-top: 1px; }
+.tt-c-big { font-family: "Geist Mono", monospace; font-variant-numeric: tabular-nums; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; flex: 0 0 auto; }
+.tt-c-big.idle { color: var(--muted-foreground); opacity: 0.55; }
+.tt-c-big.live { color: var(--run); }
+
+.tt-c-search {
+  display: flex; align-items: center; gap: 8px;
+  margin: 0 12px 8px; padding: 7px 11px;
+  border-radius: var(--radius-md); border: 1px solid var(--border);
+  background: var(--background); color: var(--muted-foreground);
+}
+.tt-c-search svg { width: 14px; height: 14px; }
+.tt-c-search input { flex: 1; background: transparent; border: 0; outline: 0; color: var(--foreground); font-family: inherit; font-size: 12.5px; }
+.tt-c-search input::placeholder { color: var(--muted-foreground); }
+
+.tt-c-thead { display: grid; grid-template-columns: 18px 1fr 56px 56px 40px; gap: 10px; padding: 4px 10px 6px; font-size: 9.5px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted-foreground); border-bottom: 1px solid var(--border); }
+.tt-c-thead .r { text-align: right; }
+.tt-crow { display: grid; grid-template-columns: 18px 1fr 56px 56px 40px; gap: 10px; align-items: center; padding: 8px 10px; border-radius: var(--radius-sm); border: 1px solid transparent; cursor: pointer; }
+.tt-crow:hover { background: var(--muted); }
+.tt-crow.running { background: var(--run-dim); border-color: var(--run-line); }
+.tt-crow.selected { border-color: var(--ring); background: var(--muted); }
+.tt-crow .cn { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.tt-crow .cn .sw { width: 8px; height: 8px; border-radius: 2px; flex: 0 0 auto; }
+.tt-crow .cn .nm { font-size: 12.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tt-crow .cn .tg { font-size: 9.5px; color: var(--muted-foreground); }
+.tt-crow.running .cn .nm { color: var(--run); }
+.tt-crow .num { width: 17px; height: 17px; display: grid; place-items: center; font-family: "Geist Mono", monospace; font-size: 9.5px; font-weight: 600; border-radius: 4px; background: var(--muted); color: var(--muted-foreground); border: 1px solid var(--border); }
+.tt-crow .cv { font-family: "Geist Mono", monospace; font-variant-numeric: tabular-nums; font-size: 11.5px; text-align: right; color: var(--foreground); }
+.tt-crow .cv.dim { color: var(--muted-foreground); }
+.tt-crow.running .cv.today { color: var(--run); font-weight: 600; }
+
+/* =====================================================
+   Interactive main screen (Direction B) — extras
+   ===================================================== */
+.tt-list.scroll { overflow-y: auto; }
+.tt-list.scroll::-webkit-scrollbar { width: 8px; }
+.tt-list.scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
+.tt-list.scroll::-webkit-scrollbar-thumb:hover { background: var(--muted-foreground); background-clip: padding-box; }
+
+/* number-key badge on B rows */
+.tt-row .rnum {
+  width: 17px; height: 17px; flex: 0 0 17px;
+  display: grid; place-items: center;
+  font-family: "Geist Mono", monospace; font-size: 9.5px; font-weight: 600;
+  border-radius: 4px; background: var(--muted); color: var(--muted-foreground);
+  border: 1px solid var(--border);
+  align-self: center;
+}
+.tt-row.running .rnum { background: var(--run-dim); color: var(--run); border-color: var(--run-line); }
+
+/* hero edit (manual time) button */
+.tt-b-editbtn {
+  margin-left: 4px; width: 22px; height: 22px; border: 0; background: transparent;
+  color: var(--muted-foreground); border-radius: 6px; cursor: pointer;
+  display: inline-grid; place-items: center; vertical-align: middle;
+}
+.tt-b-editbtn:hover { background: var(--muted); color: var(--foreground); }
+.tt-b-editbtn svg { width: 13px; height: 13px; display: block; }
+
+/* inline filter / add inputs */
+.tt-inline {
+  display: flex; align-items: center; gap: 8px;
+  margin: 0 0 6px; padding: 7px 11px;
+  border-radius: var(--radius-md); border: 1px solid var(--ring);
+  background: var(--background);
+}
+.tt-inline svg { width: 14px; height: 14px; color: var(--muted-foreground); flex: 0 0 auto; }
+.tt-inline input { flex: 1; min-width: 0; background: transparent; border: 0; outline: 0; color: var(--foreground); font-family: inherit; font-size: 13px; }
+.tt-inline input::placeholder { color: var(--muted-foreground); }
+.tt-inline .esc { font-size: 9.5px; }
+.tt-inline .swatch-pick { width: 10px; height: 10px; border-radius: 3px; flex: 0 0 auto; }
+
+/* completed divider */
+.tt-done-div { display: flex; align-items: center; gap: 8px; padding: 10px 6px 6px; font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted-foreground); }
+.tt-done-div::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+
+/* toast — in-app elapsed reminder (⑨ preview, subtle) */
+.tt-toast {
+  position: absolute; left: 12px; right: 12px; bottom: 52px;
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; border-radius: var(--radius-md);
+  background: var(--popover); border: 1px solid var(--run-line);
+  box-shadow: var(--shadow-lg);
+  font-size: 12px; color: var(--foreground);
+  animation: ttslide .26s cubic-bezier(.2,.7,.3,1);
+}
+@keyframes ttslide { from { transform: translateY(8px); } to { transform: none; } }
+.tt-toast .ti { width: 16px; height: 16px; color: var(--run); flex: 0 0 auto; }
+.tt-toast .x { margin-left: auto; width: 22px; height: 22px; border: 0; background: transparent; color: var(--muted-foreground); border-radius: 6px; cursor: pointer; display: grid; place-items: center; }
+.tt-toast .x:hover { background: var(--muted); }
+
+/* empty CTA active states */
+.tt-empty .tt-btn { cursor: pointer; }
+.tt-row.nav-flash { animation: ttflash .5s ease; }
+@keyframes ttflash { 0%,100% { background: transparent; } 40% { background: var(--muted); } }
+
+/* =====================================================
+   Inline add box w/ category picker (③ & main)
+   ===================================================== */
+.tt-inline-add {
+  width: 26px; height: 26px; flex: 0 0 26px;
+  border: 0; background: var(--secondary); color: var(--foreground);
+  border-radius: 6px; cursor: pointer; display: grid; place-items: center;
+}
+.tt-inline-add:hover:not(:disabled) { filter: brightness(1.12); }
+.tt-inline-add:disabled { opacity: .4; cursor: default; }
+.tt-inline-add svg { width: 13px; height: 13px; }
+
+.tt-addbox {
+  margin: 0 0 8px; padding: 9px 11px;
+  border-radius: var(--radius-md); border: 1px solid var(--ring);
+  background: var(--background);
+  display: flex; flex-direction: column; gap: 9px;
+}
+
+/* category chooser */
+.tt-catrow { display: flex; flex-wrap: wrap; gap: 6px; }
+.tt-cat {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-family: inherit; font-size: 11.5px; font-weight: 500;
+  padding: 4px 9px 4px 7px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--card);
+  color: var(--muted-foreground); cursor: pointer;
+}
+.tt-cat:hover { border-color: var(--ring); color: var(--foreground); }
+.tt-cat .d { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+.tt-cat.sel { font-weight: 600; }
+
+/* add / manage controls in the category row */
+.tt-cat-add, .tt-cat-manage { gap: 4px; padding: 4px 10px 4px 8px; border-style: dashed; }
+.tt-cat-add svg, .tt-cat-manage svg { width: 12px; height: 12px; }
+.tt-cat-manage.on { border-style: solid; border-color: var(--ring); color: var(--foreground); }
+.tt-cat.rm { border-color: #f8717188; color: #fca5a5; background: rgba(248,113,113,.10); }
+.tt-cat.rm:hover { border-color: #f87171; color: #fecaca; background: rgba(248,113,113,.18); }
+.tt-cat .rmx { display: inline-flex; }
+.tt-cat .rmx svg { width: 11px; height: 11px; }
+.tt-cat-addbox {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 4px 2px 8px; border-radius: 999px;
+  border: 1px solid var(--ring); background: var(--card);
+}
+.tt-cat-addbox input {
+  width: 88px; border: 0; outline: 0; background: transparent;
+  font-family: inherit; font-size: 11.5px; color: var(--foreground); padding: 2px 0;
+}
+.tt-cat-addbox .ok {
+  display: inline-grid; place-items: center; width: 20px; height: 20px;
+  border: 0; border-radius: 999px; cursor: pointer;
+  background: var(--accent, var(--ring)); color: #0a0a0b;
+}
+.tt-cat-addbox .ok:disabled { opacity: .4; cursor: default; }
+.tt-cat-addbox .ok svg { width: 12px; height: 12px; }
+
+/* =====================================================
+   Overlay screens (③ morning, ④ routines)
+   ===================================================== */
+.tt-overlay {
+  flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0;
+}
+
+.tt-ov-head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 16px 12px 10px; border-bottom: 1px solid var(--border);
+}
+.tt-ov-back {
+  width: 30px; height: 30px; flex: 0 0 30px; border: 1px solid var(--border);
+  background: var(--card); color: var(--foreground); border-radius: var(--radius-md);
+  cursor: pointer; display: grid; place-items: center;
+}
+.tt-ov-back:hover { background: var(--muted); border-color: var(--ring); }
+.tt-ov-back svg { width: 15px; height: 15px; }
+.tt-ov-titles .t { font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 7px; }
+.tt-ov-titles .t .ti { width: 16px; height: 16px; color: var(--run); }
+.tt-ov-titles .s { font-size: 11.5px; color: var(--muted-foreground); margin-top: 1px; }
+
+.tt-ov-body { flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; padding: 14px 16px 16px; }
+.tt-ov-body::-webkit-scrollbar { width: 8px; }
+.tt-ov-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
+
+.tt-ov-sec { display: flex; align-items: center; justify-content: space-between; margin-bottom: 9px; }
+.tt-ov-sec .lbl { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted-foreground); white-space: nowrap; }
+.tt-ov-sec .lbl .cnt { color: var(--foreground); margin-left: 3px; }
+.tt-linkbtn {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11.5px; font-weight: 500; color: var(--muted-foreground);
+  background: transparent; border: 0; cursor: pointer; padding: 2px 4px; border-radius: 6px;
+}
+.tt-linkbtn:hover { color: var(--foreground); background: var(--muted); }
+.tt-linkbtn svg { width: 13px; height: 13px; }
+
+/* routine selection chips (③) */
+.tt-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.tt-chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-family: inherit; font-size: 13px; font-weight: 500;
+  padding: 7px 11px 7px 9px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--card);
+  color: var(--foreground); cursor: pointer; transition: border-color .12s, background .12s;
+}
+.tt-chip:hover { border-color: var(--ring); }
+.tt-chip .d { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
+.tt-chip .nm { white-space: nowrap; }
+.tt-chip .ck { width: 14px; height: 14px; margin-left: 1px; color: var(--run); }
+.tt-chip.sel { font-weight: 600; }
+.tt-chip.already { opacity: .5; cursor: default; }
+.tt-chip.already .ck { color: var(--muted-foreground); }
+
+/* pending list (③) */
+.tt-pendrow {
+  display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: 9px;
+  padding: 8px 10px; border-radius: var(--radius-md); background: var(--secondary); margin-top: 6px;
+}
+.tt-pendrow .d { width: 8px; height: 8px; border-radius: 50%; }
+.tt-pendrow .nm { font-size: 13px; font-weight: 500; }
+.tt-pendrow .tg { font-size: 10.5px; color: var(--muted-foreground); }
+.tt-pendrow .rm { width: 22px; height: 22px; border: 0; background: transparent; color: var(--muted-foreground); border-radius: 6px; cursor: pointer; display: grid; place-items: center; }
+.tt-pendrow .rm:hover { background: var(--muted); color: var(--destructive); }
+.tt-pendrow .rm svg { width: 13px; height: 13px; }
+
+/* routine rows (④) */
+.tt-rtrow {
+  display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: 10px;
+  padding: 11px 12px; border-radius: var(--radius-md); border: 1px solid var(--border);
+  background: var(--card); margin-top: 6px;
+}
+.tt-rtrow .d { width: 9px; height: 9px; border-radius: 50%; }
+.tt-rtrow .nm { font-size: 13.5px; font-weight: 500; }
+.tt-rtrow .tg { font-size: 10px; padding: 1px 8px; border-radius: 999px; background: var(--secondary); color: var(--muted-foreground); border: 1px solid var(--border); }
+.tt-rtrow .rm { width: 28px; height: 28px; border: 0; background: transparent; color: var(--muted-foreground); border-radius: 6px; cursor: pointer; display: grid; place-items: center; }
+.tt-rtrow .rm:hover { background: oklch(0.704 0.191 22.216 / 0.18); color: var(--destructive); }
+.tt-rtrow .rm svg { width: 15px; height: 15px; }
+
+.tt-ov-empty { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 10px; padding: 28px 24px; color: var(--muted-foreground); }
+.tt-ov-empty svg { width: 30px; height: 30px; opacity: .5; }
+.tt-ov-empty p { font-size: 12.5px; margin: 0; max-width: 260px; }
+
+.tt-ov-foot {
+  flex: 0 0 auto; border-top: 1px solid var(--border); background: var(--card);
+  padding: 10px 12px; display: flex; align-items: center; gap: 10px;
+}
+
+/* =====================================================
+   Task editor (edit name / category / time)
+   ===================================================== */
+.tt-field { margin-bottom: 16px; }
+.tt-field > .lbl { display: block; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted-foreground); margin-bottom: 8px; }
+.tt-textin {
+  width: 100%; font-family: inherit; font-size: 14px; color: var(--foreground);
+  background: var(--background); border: 1px solid var(--border); border-radius: var(--radius-md);
+  padding: 9px 12px; outline: none;
+}
+.tt-textin:focus { border-color: var(--ring); box-shadow: 0 0 0 3px oklch(0.708 0 0 / 0.18); }
+.tt-textin::placeholder { color: var(--muted-foreground); }
+
+.tt-timegrp { display: flex; align-items: center; gap: 8px; }
+.tt-timefield {
+  display: inline-flex; align-items: baseline; gap: 4px;
+  background: var(--background); border: 1px solid var(--border); border-radius: var(--radius-md);
+  padding: 7px 11px;
+}
+.tt-timefield:focus-within { border-color: var(--ring); box-shadow: 0 0 0 3px oklch(0.708 0 0 / 0.18); }
+.tt-timefield input {
+  width: 44px; font-family: "Geist Mono", monospace; font-variant-numeric: tabular-nums;
+  font-size: 18px; font-weight: 600; text-align: right; color: var(--foreground);
+  background: transparent; border: 0; outline: none; -moz-appearance: textfield;
+}
+.tt-timefield input::-webkit-outer-spin-button, .tt-timefield input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.tt-timefield .u { font-size: 12px; color: var(--muted-foreground); }
+.tt-timegrp .colon { font-family: "Geist Mono", monospace; font-size: 18px; font-weight: 600; color: var(--muted-foreground); }
+.tt-timehint { font-size: 11px; color: var(--muted-foreground); margin: 8px 0 0; display: flex; gap: 8px; }
+.tt-timehint button { font-family: inherit; font-size: 11px; color: var(--muted-foreground); background: var(--secondary); border: 1px solid var(--border); border-radius: 999px; padding: 2px 9px; cursor: pointer; }
+.tt-timehint button:hover { color: var(--foreground); border-color: var(--ring); }
+
+.tt-ed-preview {
+  display: flex; align-items: center; gap: 9px; padding: 11px 12px; margin-bottom: 16px;
+  border-radius: var(--radius-md); border: 1px solid var(--border); background: var(--card);
+}
+.tt-ed-preview .d { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
+.tt-ed-preview .nm { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tt-ed-preview .tg { font-size: 10px; padding: 1px 8px; border-radius: 999px; background: var(--secondary); color: var(--muted-foreground); border: 1px solid var(--border); margin-left: auto; flex: 0 0 auto; }
+
+.tt-btn-danger { background: transparent; color: var(--destructive); border-color: var(--border); }
+.tt-btn-danger:hover { background: oklch(0.704 0.191 22.216 / 0.15); border-color: var(--destructive); }
+
+/* =====================================================
+   Accent variants (set via data-accent on root .tt)
+   ===================================================== */
+.tt[data-accent="blue"] {
+  --run: oklch(0.62 0.19 256); --run-dim: oklch(0.62 0.19 256 / 0.16);
+  --run-line: oklch(0.62 0.19 256 / 0.45); --run-glow: oklch(0.62 0.19 256 / 0.22);
+}
+.tt[data-accent="amber"] {
+  --run: oklch(0.77 0.16 70); --run-dim: oklch(0.77 0.16 70 / 0.16);
+  --run-line: oklch(0.77 0.16 70 / 0.45); --run-glow: oklch(0.77 0.16 70 / 0.22);
+}
+.tt[data-accent="blue"]  .tt-btn-run, .tt[data-accent="amber"] .tt-btn-run { color: #fff; }
+.tt-ov-foot .tt-btn-run, .tt-ov-foot .tt-btn-run svg { color: #fff; stroke: #fff; }
+.tt-b-cta .tt-btn-run polygon { stroke: rgb(255, 255, 255); }
+.tt[data-accent="blue"] .tt-btn-run, .tt[data-accent="amber"] .tt-btn-run, .tt-b-cta .tt-btn-run { color: #fff; }
+.tt[data-accent="amber"] .tt-btn-run { color: #2a1a00; }
+
+/* =====================================================
+   ⑤ Settings
+   ===================================================== */
+.tt-set-group { margin-bottom: 20px; }
+.tt-set-group > .gh {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--muted-foreground); margin-bottom: 9px;
+}
+.tt-set-group > .gh svg { width: 13px; height: 13px; }
+
+.tt-set-card {
+  border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--card);
+  overflow: hidden;
+}
+.tt-set-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px;
+}
+.tt-set-row + .tt-set-row { border-top: 1px solid var(--border); }
+.tt-set-row .info { min-width: 0; flex: 1 1 auto; }
+.tt-set-row .info .t { font-size: 13.5px; font-weight: 500; color: var(--foreground); }
+.tt-set-row .info .d { font-size: 11.5px; color: var(--muted-foreground); margin-top: 1px; }
+.tt-set-row .ctrl { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; }
+.tt-set-row.disabled .info { opacity: 0.5; }
+.tt-set-row.clickable { cursor: pointer; }
+.tt-set-row.clickable:hover { background: var(--muted); }
+.tt-set-row .chev { color: var(--muted-foreground); }
+.tt-set-row .chev svg { width: 16px; height: 16px; }
+
+/* switch */
+.tt-switch {
+  width: 38px; height: 22px; border-radius: 999px; border: 0; cursor: pointer; padding: 0;
+  background: var(--input); position: relative; flex: 0 0 38px;
+}
+.tt-switch .knob {
+  position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%;
+  background: #fff; transition: transform .15s; box-shadow: 0 1px 2px rgba(0,0,0,.3);
+}
+.tt-switch[data-on="true"] { background: var(--run); }
+.tt-switch[data-on="true"] .knob { transform: translateX(16px); }
+
+/* compact number field (minutes) */
+.tt-numfield {
+  display: inline-flex; align-items: baseline; gap: 4px;
+  background: var(--background); border: 1px solid var(--border); border-radius: var(--radius-md);
+  padding: 6px 10px;
+}
+.tt-numfield:focus-within { border-color: var(--ring); box-shadow: 0 0 0 3px oklch(0.708 0 0 / 0.18); }
+.tt-numfield input {
+  width: 40px; font-family: "Geist Mono", monospace; font-variant-numeric: tabular-nums;
+  font-size: 15px; font-weight: 600; text-align: right; color: var(--foreground);
+  background: transparent; border: 0; outline: none; -moz-appearance: textfield;
+}
+.tt-numfield input::-webkit-outer-spin-button, .tt-numfield input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.tt-numfield .u { font-size: 12px; color: var(--muted-foreground); }
+
+/* time input (HH:MM) */
+.tt-clockfield {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--background); border: 1px solid var(--border); border-radius: var(--radius-md);
+  padding: 6px 10px; color: var(--muted-foreground);
+}
+.tt-clockfield:focus-within { border-color: var(--ring); box-shadow: 0 0 0 3px oklch(0.708 0 0 / 0.18); }
+.tt-clockfield svg { width: 14px; height: 14px; }
+.tt-clockfield input {
+  font-family: "Geist Mono", monospace; font-variant-numeric: tabular-nums;
+  font-size: 15px; font-weight: 600; color: var(--foreground);
+  background: transparent; border: 0; outline: none; width: 82px;
+}
+.tt-clockfield input::-webkit-calendar-picker-indicator { filter: invert(0.6); cursor: pointer; }
+
+/* shortcut recorder */
+.tt-shortcut {
+  display: inline-flex; align-items: center; gap: 5px; min-height: 34px;
+  padding: 5px 10px; cursor: pointer;
+  background: var(--background); border: 1px solid var(--border); border-radius: var(--radius-md);
+  font-family: inherit;
+}
+.tt-shortcut:hover { border-color: var(--ring); }
+.tt-shortcut.rec { border-color: var(--run); box-shadow: 0 0 0 3px var(--run-glow); }
+.tt-shortcut:focus-visible { outline: none; border-color: var(--ring); box-shadow: 0 0 0 3px oklch(0.708 0 0 / 0.18); }
+.tt-shortcut:disabled { opacity: 0.5; pointer-events: none; }
+.tt-shortcut .hint { font-size: 12px; color: var(--run); }
+.tt-shortcut kbd {
+  font-family: "Geist Mono", monospace; font-size: 11px; line-height: 1;
+  padding: 4px 7px; border-radius: 6px;
+  background: var(--muted); color: var(--foreground); border: 1px solid var(--border);
+}
+
+/* segmented control */
+.tt-seg { display: inline-flex; background: var(--secondary); border-radius: var(--radius-md); padding: 2px; gap: 2px; }
+.tt-seg button {
+  font-family: inherit; font-size: 12px; font-weight: 500; color: var(--muted-foreground);
+  background: transparent; border: 0; border-radius: calc(var(--radius-md) - 2px);
+  padding: 5px 11px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px;
+}
+.tt-seg button svg { width: 13px; height: 13px; }
+.tt-seg button.sel { background: var(--background); color: var(--foreground); box-shadow: var(--shadow-xs); }
+
+/* accent swatches */
+.tt-accents { display: inline-flex; gap: 8px; }
+.tt-accents button {
+  width: 26px; height: 26px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0;
+  display: grid; place-items: center;
+}
+.tt-accents button .dot { width: 16px; height: 16px; border-radius: 50%; }
+.tt-accents button.sel { border-color: var(--foreground); }
+.tt-accents button .ck { width: 12px; height: 12px; color: #fff; }
+
+.tt-set-foot-note { font-size: 11px; color: var(--muted-foreground); text-align: center; padding: 2px 0 4px; }
+
+/* =====================================================
+   ⑥ Calendar
+   ===================================================== */
+.tt-cal-sub {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 16px; border-bottom: 1px solid var(--border);
+}
+.tt-cal-nav { display: flex; align-items: center; gap: 2px; }
+.tt-cal-nav button {
+  width: 28px; height: 28px; border: 0; background: transparent; color: var(--muted-foreground);
+  border-radius: 6px; cursor: pointer; display: grid; place-items: center;
+}
+.tt-cal-nav button:hover { background: var(--muted); color: var(--foreground); }
+.tt-cal-nav button svg { width: 16px; height: 16px; }
+.tt-cal-period { font-size: 14px; font-weight: 600; min-width: 96px; text-align: center; }
+.tt-cal-today {
+  font-family: inherit; font-size: 11.5px; font-weight: 500; color: var(--muted-foreground);
+  background: var(--card); border: 1px solid var(--border); border-radius: 999px;
+  padding: 4px 11px; cursor: pointer;
+}
+.tt-cal-today:hover { color: var(--foreground); border-color: var(--ring); }
+.tt-cal-spacer { flex: 1 1 auto; }
+
+/* month grid */
+.tt-cal-body { flex: 1 1 auto; overflow-y: auto; display: flex; flex-direction: column; min-height: 0; }
+.tt-cal-body::-webkit-scrollbar { width: 8px; }
+.tt-cal-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
+.tt-cal-dow { display: grid; grid-template-columns: repeat(7, 1fr); padding: 8px 12px 4px; }
+.tt-cal-dow span { font-size: 10.5px; font-weight: 600; text-align: center; color: var(--muted-foreground); }
+.tt-cal-dow span.sun { color: oklch(0.704 0.191 22.216); }
+.tt-cal-dow span.sat { color: oklch(0.62 0.19 256); }
+.tt-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; padding: 0 12px 8px; }
+.tt-cal-cell {
+  position: relative; min-height: 58px; border-radius: 8px; border: 1px solid transparent;
+  background: var(--card); padding: 5px 4px 4px; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 3px;
+  transition: border-color .12s, background .12s;
+}
+.tt-cal-cell:hover { border-color: var(--ring); }
+.tt-cal-cell .dn { font-size: 12px; font-weight: 600; color: var(--foreground); line-height: 1; }
+.tt-cal-cell .tot { font-family: "Geist Mono", monospace; font-size: 9.5px; color: var(--muted-foreground); line-height: 1; }
+.tt-cal-cell .dots { display: flex; flex-wrap: wrap; gap: 2px; justify-content: center; margin-top: auto; padding-top: 2px; }
+.tt-cal-cell .dots i { width: 5px; height: 5px; border-radius: 50%; display: block; }
+.tt-cal-cell.other { background: transparent; }
+.tt-cal-cell.other .dn { color: var(--muted-foreground); opacity: 0.45; }
+.tt-cal-cell.today .dn { color: var(--run); }
+.tt-cal-cell.today { box-shadow: inset 0 0 0 1px var(--run-line); }
+.tt-cal-cell.sel { border-color: var(--run); background: var(--run-dim); }
+.tt-cal-cell.dragover { border-color: var(--run); background: var(--run-dim); box-shadow: 0 0 0 2px var(--run-line); }
+
+/* day detail (month) */
+.tt-cal-detail { border-top: 1px solid var(--border); padding: 12px 16px 16px; }
+.tt-cal-detail .dh { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 10px; }
+.tt-cal-detail .dh .dt { font-size: 13.5px; font-weight: 600; }
+.tt-cal-detail .dh .dtot { font-family: "Geist Mono", monospace; font-size: 13px; font-weight: 600; color: var(--run); }
+.tt-cal-detail .empty { font-size: 12px; color: var(--muted-foreground); text-align: center; padding: 16px 0; }
+
+/* entry row (draggable) */
+.tt-cal-entry {
+  display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: 9px;
+  padding: 9px 10px; border-radius: var(--radius-md); border: 1px solid var(--border); background: var(--card);
+  cursor: pointer; user-select: none;
+}
+.tt-cal-entry + .tt-cal-entry { margin-top: 6px; }
+.tt-cal-entry:hover { border-color: var(--ring); }
+.tt-cal-entry.dragging { opacity: 0.4; }
+.tt-cal-entry .grip { color: var(--muted-foreground); cursor: grab; display: grid; place-items: center; }
+.tt-cal-entry .grip svg { width: 14px; height: 14px; }
+.tt-cal-entry .d { width: 8px; height: 8px; border-radius: 50%; }
+.tt-cal-entry .nm { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tt-cal-entry .tg { font-size: 10px; color: var(--muted-foreground); }
+.tt-cal-entry .tm { font-family: "Geist Mono", monospace; font-size: 12px; font-weight: 600; }
+.tt-cal-entry .em { display: flex; align-items: center; gap: 6px; min-width: 0; }
+
+/* week view */
+.tt-week { padding: 8px 12px 16px; }
+.tt-week-day { margin-top: 8px; border-radius: var(--radius-md); border: 1px solid var(--border); overflow: hidden; }
+.tt-week-day .wh {
+  display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--card);
+  border-bottom: 1px solid var(--border);
+}
+.tt-week-day .wh .wd { font-size: 12px; font-weight: 600; }
+.tt-week-day .wh .wn { font-family: "Geist Mono", monospace; font-size: 11px; color: var(--muted-foreground); }
+.tt-week-day .wh .wtot { margin-left: auto; font-family: "Geist Mono", monospace; font-size: 12px; font-weight: 600; color: var(--muted-foreground); }
+.tt-week-day.today .wh { background: var(--run-dim); }
+.tt-week-day.today .wh .wd { color: var(--run); }
+.tt-week-day.today .wh .wtot { color: var(--run); }
+.tt-week-day.dragover { border-color: var(--run); box-shadow: 0 0 0 2px var(--run-line); }
+.tt-week-day .wbody { padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; min-height: 12px; }
+.tt-week-day .wempty { font-size: 11px; color: var(--muted-foreground); padding: 4px 2px; }
+.tt-week-day.dragover .wbody { background: var(--run-dim); }
+
+/* date input (entry editor) */
+.tt-datefield {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--background); border: 1px solid var(--border); border-radius: var(--radius-md);
+  padding: 8px 12px; color: var(--muted-foreground); width: 100%;
+}
+.tt-datefield:focus-within { border-color: var(--ring); box-shadow: 0 0 0 3px oklch(0.708 0 0 / 0.18); }
+.tt-datefield svg { width: 15px; height: 15px; }
+.tt-datefield input {
+  font-family: "Geist Mono", monospace; font-size: 14px; font-weight: 600; color: var(--foreground);
+  background: transparent; border: 0; outline: none; flex: 1;
+}
+.tt-datefield input::-webkit-calendar-picker-indicator { filter: invert(0.6); cursor: pointer; }
+.tt-drag-hint { font-size: 11px; color: var(--muted-foreground); display: flex; align-items: center; gap: 6px; padding: 0 16px 8px; }
+.tt-drag-hint svg { width: 13px; height: 13px; }
+
+/* =====================================================
+   ⑦ Stats / report
+   ===================================================== */
+.tt-stat-summary {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  padding: 16px 16px 6px;
+}
+.tt-stat-summary .big { font-family: "Geist Mono", monospace; font-variant-numeric: tabular-nums; font-size: 34px; font-weight: 600; line-height: 1; color: var(--foreground); }
+.tt-stat-summary .lbl { font-size: 11px; color: var(--muted-foreground); margin-bottom: 5px; }
+.tt-stat-summary .side { text-align: right; font-size: 11.5px; color: var(--muted-foreground); white-space: nowrap; }
+.tt-stat-summary .side b { color: var(--foreground); font-weight: 600; }
+
+.tt-stat-card {
+  margin: 10px 16px 0; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--card);
+}
+.tt-stat-card .ch { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted-foreground); margin-bottom: 12px; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.tt-stat-card .ch svg { width: 13px; height: 13px; }
+
+/* donut + legend */
+.tt-donut-wrap { display: flex; align-items: center; gap: 16px; }
+.tt-donut { position: relative; flex: 0 0 124px; width: 124px; height: 124px; }
+.tt-donut svg { transform: rotate(-90deg); display: block; }
+.tt-donut .center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.tt-donut .center .v { font-family: "Geist Mono", monospace; font-size: 17px; font-weight: 600; }
+.tt-donut .center .k { font-size: 9.5px; color: var(--muted-foreground); }
+.tt-legend { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 7px; }
+.tt-leg { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; }
+.tt-leg .d { width: 9px; height: 9px; border-radius: 2px; }
+.tt-leg .nm { font-size: 12px; color: var(--foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tt-leg .vv { font-family: "Geist Mono", monospace; font-size: 11.5px; color: var(--muted-foreground); }
+.tt-leg .pct { font-size: 10px; color: var(--muted-foreground); width: 34px; text-align: right; }
+
+/* ranked bars */
+.tt-bars { display: flex; flex-direction: column; gap: 11px; }
+.tt-bar { }
+.tt-bar .top { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 5px; }
+.tt-bar .top .nm { font-size: 12.5px; font-weight: 500; display: flex; align-items: center; gap: 7px; min-width: 0; }
+.tt-bar .top .nm .d { width: 8px; height: 8px; border-radius: 2px; flex: 0 0 auto; }
+.tt-bar .top .nm span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tt-bar .top .vv { font-family: "Geist Mono", monospace; font-size: 12px; font-weight: 600; color: var(--foreground); flex: 0 0 auto; margin-left: 8px; }
+.tt-bar .track { height: 8px; border-radius: 999px; background: var(--secondary); overflow: hidden; }
+.tt-bar .fill { height: 100%; border-radius: 999px; }
+
+/* daily trend bars */
+.tt-trend { display: flex; align-items: flex-end; gap: 5px; height: 96px; padding-top: 4px; }
+.tt-trend .col { flex: 1 1 0; display: flex; flex-direction: column; align-items: center; gap: 5px; height: 100%; justify-content: flex-end; }
+.tt-trend .col .bar { width: 100%; max-width: 26px; background: var(--run-dim); border: 1px solid var(--run-line); border-radius: 4px 4px 0 0; min-height: 2px; }
+.tt-trend .col.today .bar { background: var(--run); border-color: var(--run); }
+.tt-trend .col .lab { font-size: 9.5px; color: var(--muted-foreground); }
+.tt-trend .col.today .lab { color: var(--run); font-weight: 600; }
+
+.tt-csv-row { padding: 14px 16px 18px; }
+.tt-stat-empty { flex: 1 1 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 28px; gap: 4px; color: var(--muted-foreground); }
+.tt-stat-empty .ico { width: 46px; height: 46px; border-radius: 14px; display: grid; place-items: center; background: var(--muted); margin-bottom: 10px; }
+.tt-stat-empty .ico svg { width: 22px; height: 22px; }
+.tt-stat-empty h3 { font-size: 14.5px; font-weight: 600; color: var(--foreground); margin: 0; }
+.tt-stat-empty p { font-size: 12px; margin: 2px 0 0; max-width: 220px; }
+
+/* =====================================================
+   ⑧ Carryover dialog (modal over main)
+   ===================================================== */
+.tt-scrim {
+  position: absolute; inset: 0; z-index: 50;
+  background: oklch(0 0 0 / 0.55);
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+.tt-dialog {
+  width: 100%; max-width: 400px; max-height: calc(100% - 40px);
+  display: flex; flex-direction: column;
+  background: var(--popover); color: var(--popover-foreground);
+  border: 1px solid var(--border); border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-xl); overflow: hidden;
+}
+.tt-dlg-head { padding: 16px 16px 12px; display: flex; gap: 11px; }
+.tt-dlg-head .ico { width: 36px; height: 36px; flex: 0 0 36px; border-radius: 10px; display: grid; place-items: center; background: var(--run-dim); color: var(--run); }
+.tt-dlg-head .ico svg { width: 18px; height: 18px; }
+.tt-dlg-head .tx { flex: 1 1 auto; min-width: 0; }
+.tt-dlg-head .tx .t { font-size: 15px; font-weight: 600; line-height: 1.3; }
+.tt-dlg-head .tx .d { font-size: 12.5px; color: var(--muted-foreground); margin-top: 2px; }
+.tt-dlg-head .close { width: 26px; height: 26px; flex: 0 0 26px; border: 0; background: transparent; color: var(--muted-foreground); border-radius: 6px; cursor: pointer; display: grid; place-items: center; }
+.tt-dlg-head .close:hover { background: var(--muted); color: var(--foreground); }
+.tt-dlg-head .close svg { width: 15px; height: 15px; }
+
+.tt-dlg-selbar { display: flex; align-items: center; justify-content: space-between; padding: 2px 16px 8px; }
+.tt-dlg-selbar .lbl { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted-foreground); }
+.tt-dlg-selall { font-family: inherit; font-size: 11.5px; font-weight: 500; color: var(--muted-foreground); background: transparent; border: 0; cursor: pointer; padding: 2px 4px; border-radius: 6px; }
+.tt-dlg-selall:hover { color: var(--foreground); }
+
+.tt-dlg-list { overflow-y: auto; padding: 0 12px 4px; }
+.tt-dlg-list::-webkit-scrollbar { width: 8px; }
+.tt-dlg-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
+.tt-checkrow {
+  display: grid; grid-template-columns: auto auto 1fr auto; align-items: center; gap: 10px;
+  padding: 9px 8px; border-radius: var(--radius-md); cursor: pointer;
+}
+.tt-checkrow:hover { background: var(--muted); }
+.tt-checkrow + .tt-checkrow { border-top: 1px solid var(--border); }
+.tt-checkbox { width: 18px; height: 18px; flex: 0 0 18px; border-radius: 5px; border: 1.5px solid var(--border); display: grid; place-items: center; color: transparent; }
+.tt-checkbox svg { width: 12px; height: 12px; }
+.tt-checkrow.on .tt-checkbox { background: var(--run); border-color: var(--run); color: #04140b; }
+.tt-checkrow .sw { width: 8px; height: 8px; border-radius: 50%; }
+.tt-checkrow .nm { font-size: 13.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tt-checkrow .nm .tg { font-size: 10px; color: var(--muted-foreground); margin-left: 6px; }
+.tt-checkrow .tm { font-family: "Geist Mono", monospace; font-size: 12px; color: var(--muted-foreground); }
+
+.tt-dlg-foot { padding: 12px 16px 14px; display: flex; gap: 10px; border-top: 1px solid var(--border); margin-top: 4px; }
+
+/* ⑨ reminder: settings note + preview row */
+.tt-set-note { display: flex; align-items: flex-start; gap: 7px; font-size: 11px; color: var(--muted-foreground); margin: 8px 2px 0; line-height: 1.45; }
+.tt-set-note svg { width: 13px; height: 13px; flex: 0 0 13px; margin-top: 1px; }
+.tt-set-row .ctrl.preview { color: var(--run); }
+.tt-set-row .ctrl.preview svg { width: 16px; height: 16px; }
+
+/* expandable category manager inside Settings */
+.tt-set-row .chev.open svg { transform: rotate(180deg); transition: transform .15s; }
+.tt-set-sub { border-top: 1px solid var(--border); background: var(--background); padding: 12px 14px; }
+.tt-catmgr-list { display: flex; flex-direction: column; gap: 1px; }
+.tt-catmgr-row {
+  display: flex; align-items: center; gap: 9px;
+  padding: 7px 2px;
+}
+.tt-catmgr-row + .tt-catmgr-row { border-top: 1px solid var(--border); }
+.tt-catmgr-row .grip {
+  display: inline-grid; place-items: center; flex: 0 0 auto;
+  width: 18px; height: 22px; color: var(--muted-foreground);
+  cursor: grab; opacity: .55;
+}
+.tt-catmgr-row .grip:active { cursor: grabbing; }
+.tt-catmgr-row:hover .grip { opacity: 1; }
+.tt-catmgr-row .grip svg { width: 15px; height: 15px; }
+.tt-catmgr-row.dragging { opacity: .5; }
+.tt-catmgr-row.over { box-shadow: inset 0 2px 0 var(--ring); }
+.tt-catmgr-row .d { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
+.tt-catmgr-row .nm { flex: 1 1 auto; font-size: 13px; color: var(--foreground); }
+.tt-catmgr-row .std { font-size: 10.5px; color: var(--muted-foreground); border: 1px solid var(--border); border-radius: 999px; padding: 1px 7px; }
+.tt-catmgr-row .rm {
+  display: inline-grid; place-items: center; width: 24px; height: 24px;
+  border: 0; border-radius: 7px; background: transparent; color: var(--muted-foreground); cursor: pointer;
+}
+.tt-catmgr-row .rm:hover { background: rgba(248,113,113,.15); color: #fca5a5; }
+.tt-catmgr-row .rm svg { width: 14px; height: 14px; }
+.tt-catmgr-add {
+  display: flex; align-items: center; gap: 7px; margin-top: 10px;
+  padding: 7px 8px 7px 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--card);
+}
+.tt-catmgr-add > svg { width: 14px; height: 14px; color: var(--muted-foreground); flex: 0 0 auto; }
+.tt-catmgr-add input {
+  flex: 1 1 auto; min-width: 0; border: 0; outline: 0; background: transparent;
+  font-family: inherit; font-size: 13px; color: var(--foreground);
+}
+.tt-catmgr-add .ok {
+  display: inline-grid; place-items: center; width: 26px; height: 26px; flex: 0 0 auto;
+  border: 0; border-radius: 7px; cursor: pointer; background: var(--muted); color: var(--foreground);
+}
+.tt-catmgr-add .ok:hover { background: var(--ring); }
+.tt-catmgr-add .ok:disabled { opacity: .4; cursor: default; background: var(--muted); }
+.tt-catmgr-add .ok svg { width: 14px; height: 14px; }

@@ -1,0 +1,77 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "TimeTracker",
+  "version": "0.4.0",
+  "identifier": "com.ch1nzo.timetracker",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "macOSPrivateApi": true,
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "label": "main",
+        "title": "TimeTracker",
+        "width": 460,
+        "height": 680,
+        "minWidth": 460,
+        "minHeight": 680,
+        "maxWidth": 460,
+        "maxHeight": 680,
+        "resizable": false,
+        "maximizable": false,
+        "fullscreen": false,
+        "decorations": false,
+        "transparent": true,
+        "center": true,
+        "shadow": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "createUpdaterArtifacts": true,
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "category": "Productivity",
+    "shortDescription": "フォーカス型のデスクトップ作業時間トラッカー",
+    "longDescription": "TimeTracker — 大きなタイマーで今の作業に集中。トレイ常駐で裏でも計測し、グローバルショートカットで素早く開始/停止。カレンダーと集計でふりかえり。",
+    "windows": {
+      "nsis": {
+        "installMode": "perMachine",
+        "languages": ["Japanese", "English"]
+      }
+    },
+    "linux": {
+      "deb": {
+        "depends": []
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "endpoints": [
+        "https://github.com/Ch1nzo/timetracker/releases/latest/download/latest.json"
+      ],
+      "dialog": false,
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDMyMUE1OThGNkNDQTdGNDkKUldSSmY4cHNqMWthTW9uekdaK2crUlY4U1VxZHl5TTJNK1NVRVlOT2pIU0NnZTA0c2loaEkyaE4K",
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}

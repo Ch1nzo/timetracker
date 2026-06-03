@@ -1,0 +1,901 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { Update } from "@tauri-apps/plugin-updater";
+
+import { Ico } from "./lib/icons";
+import { hhmm, hm, hms, nowHM } from "./lib/format";
+import { catColor } from "./lib/categories";
+import { DEFAULT_SETTINGS, ROUTINES_SEED, TASK_SEED } from "./lib/data";
+import {
+  initData,
+  loadMain,
+  saveMain,
+  teAdd,
+  todayStr,
+} from "./lib/db";
+import {
+  IS_TAURI,
+  checkForUpdate,
+  hideToTray,
+  installUpdateAndRelaunch,
+  notify,
+  onToggleTimer,
+  syncAutostart,
+  syncGlobalShortcut,
+} from "./lib/tauri";
+import type { Note, Routine, Settings, Task } from "./lib/types";
+
+import { TitleBar } from "./components/TitleBar";
+import { StatusBar } from "./components/StatusBar";
+import { Footer } from "./components/Footer";
+import { MiniLive } from "./components/MiniLive";
+import { CategoryPicker } from "./components/CategoryPicker";
+import { MorningFlow } from "./screens/MorningFlow";
+import { RoutineManager } from "./screens/RoutineManager";
+import { TaskEditor } from "./screens/TaskEditor";
+import { Settings as SettingsScreen } from "./screens/Settings";
+import { Calendar } from "./screens/Calendar";
+import { Stats } from "./screens/Stats";
+import { CarryoverDialog } from "./screens/CarryoverDialog";
+
+const APP_VERSION = "0.4.0";
+
+/* normalize a keydown event's main key (robust against Alt remaps) */
+function evKeyName(e: KeyboardEvent): string {
+  if (/^Key[A-Z]$/.test(e.code)) return e.code.slice(3).toLowerCase();
+  if (/^Digit\d$/.test(e.code)) return e.code.slice(5);
+  return (e.key || "").toLowerCase();
+}
+/* does this event match a combo string like "Ctrl+Alt+S"? */
+function matchShortcut(e: KeyboardEvent, combo: string): boolean {
+  if (!combo) return false;
+  const parts = combo.toLowerCase().split("+").map((p) => p.trim()).filter(Boolean);
+  const mod = (m: string) => parts.includes(m);
+  if (!!e.ctrlKey !== mod("ctrl")) return false;
+  if (!!e.altKey !== mod("alt")) return false;
+  if (!!e.shiftKey !== mod("shift")) return false;
+  if (!!e.metaKey !== (mod("cmd") || mod("meta"))) return false;
+  const key = parts.filter((p) => !["ctrl", "alt", "shift", "cmd", "meta"].includes(p))[0] || "";
+  return evKeyName(e) === key;
+}
+
+export function App() {
+  const [ready, setReady] = useState(false);
+  const [tasks, setTasks] = useState<Task[]>(TASK_SEED);
+  const [routines, setRoutines] = useState<Routine[]>(ROUTINES_SEED);
+  const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
+  const [runningKey, setRunning] = useState<string | null>(null);
+  const [sessionSec, setSession] = useState(0);
+  const [navIndex, setNav] = useState(0);
+  const [screen, setScreen] = useState<
+    "main" | "morning" | "routines" | "settings" | "calendar" | "stats"
+  >("main");
+  const [editKey, setEditKey] = useState<string | null>(null);
+  const [filtering, setFiltering] = useState(false);
+  const [query, setQuery] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newCat, setNewCat] = useState("未分類");
+  const [toast, setToast] = useState(false);
+  const [note, setNote] = useState<Note | null>(null);
+  const [showCarry, setShowCarry] = useState(false);
+  const [flashKey, setFlashKey] = useState<string | null>(null);
+  const [update, setUpdate] = useState<Update | null>(null);
+  const [updating, setUpdating] = useState(false);
+
+  const filterRef = useRef<HTMLInputElement>(null);
+  const addRef = useRef<HTMLInputElement>(null);
+  const lastToastAt = useRef(0);
+  const noteTimer = useRef<number | undefined>(undefined);
+  const tasksRef = useRef(tasks);
+  const sessionRef = useRef(sessionSec);
+  const toggleActiveRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    tasksRef.current = tasks;
+  }, [tasks]);
+  useEffect(() => {
+    sessionRef.current = sessionSec;
+  }, [sessionSec]);
+
+  const q = query.trim();
+  const actives = tasks.filter((t) => !t.done && (!q || t.name.includes(q)));
+  const dones = tasks.filter((t) => t.done);
+  const clampedNav = Math.min(navIndex, Math.max(0, actives.length - 1));
+  const active = runningKey ? tasks.find((t) => t.k === runningKey) : actives[clampedNav];
+  const todayTotal = tasks.reduce((a, t) => a + t.todaySec, 0);
+  const pending = tasks.filter((t) => !t.done);
+  const live = !!runningKey;
+  const existingNames = tasks.map((t) => t.name);
+  const rootCls = "tt" + (settings.themeMode === "light" ? "" : " dark");
+  const accent = settings.accent;
+
+  // --- load persisted state once ----------------------------------------
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        await initData();
+        const init = await loadMain();
+        if (!alive) return;
+        if (init) {
+          if (init.runningKey && init.savedAt) {
+            const gap = Math.floor((Date.now() - init.savedAt) / 1000);
+            if (gap > 0 && gap < 86400) {
+              init.sessionSec = (init.sessionSec || 0) + gap;
+              const t = init.tasks.find((x) => x.k === init.runningKey);
+              if (t) {
+                t.todaySec += gap;
+                t.totalSec += gap;
+              }
+            }
+          }
+          setTasks(init.tasks);
+          if (init.routines) setRoutines(init.routines);
+          if (init.settings) setSettings({ ...DEFAULT_SETTINGS, ...init.settings });
+          setRunning(init.runningKey ?? null);
+          setSession(init.sessionSec || 0);
+          setNav(init.navIndex || 0);
+        }
+      } catch (e) {
+        console.error("load failed", e);
+      } finally {
+        if (alive) setReady(true);
+      }
+      const u = await checkForUpdate();
+      if (alive && u) setUpdate(u);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // --- persist (debounced) ----------------------------------------------
+  useEffect(() => {
+    if (!ready) return;
+    const id = window.setTimeout(() => {
+      void saveMain({
+        tasks,
+        routines,
+        settings,
+        runningKey,
+        sessionSec,
+        navIndex,
+        savedAt: Date.now(),
+      });
+    }, 400);
+    return () => clearTimeout(id);
+  }, [ready, tasks, routines, settings, runningKey, sessionSec, navIndex]);
+
+  // --- keep OS integrations in sync with settings -----------------------
+  useEffect(() => {
+    if (ready) void syncGlobalShortcut(settings.globalShortcutKeys, settings.globalShortcut);
+  }, [ready, settings.globalShortcut, settings.globalShortcutKeys]);
+  useEffect(() => {
+    if (ready) void syncAutostart(settings.autostart);
+  }, [ready, settings.autostart]);
+
+  // --- tray / global-shortcut toggle event ------------------------------
+  useEffect(() => {
+    let un: (() => void) | undefined;
+    void onToggleTimer(() => toggleActiveRef.current()).then((fn) => {
+      un = fn;
+    });
+    return () => {
+      if (un) un();
+    };
+  }, []);
+
+  // --- timer tick -------------------------------------------------------
+  useEffect(() => {
+    if (!runningKey) return;
+    const id = setInterval(() => {
+      setSession((s) => {
+        const ns = s + 1;
+        const everySec = Math.max(60, (settings.elapsedEveryMin || 25) * 60);
+        if (
+          settings.elapsedReminder &&
+          ns > 0 &&
+          ns % everySec === 0 &&
+          Date.now() - lastToastAt.current > 2000
+        ) {
+          lastToastAt.current = Date.now();
+          setToast(true);
+          const t = tasksRef.current.find((x) => x.k === runningKey);
+          void notify(t?.name ?? "計測中", `${Math.floor(ns / 60)}分が経過しました`);
+        }
+        return ns;
+      });
+      setTasks((ts) =>
+        ts.map((t) =>
+          t.k === runningKey ? { ...t, todaySec: t.todaySec + 1, totalSec: t.totalSec + 1 } : t,
+        ),
+      );
+    }, 1000);
+    return () => clearInterval(id);
+  }, [runningKey, settings.elapsedReminder, settings.elapsedEveryMin]);
+
+  // --- session logging (real time_entries) ------------------------------
+  const logSession = useCallback((key: string | null, sec: number) => {
+    if (!key || sec <= 0) return;
+    const t = tasksRef.current.find((x) => x.k === key);
+    if (!t) return;
+    void teAdd({
+      id: "te" + Date.now() + Math.random().toString(36).slice(2, 6),
+      date: todayStr(),
+      name: t.name,
+      cat: t.cat,
+      color: t.color,
+      sec,
+      source: "timer",
+      created_at: Date.now(),
+    });
+  }, []);
+
+  const startTask = useCallback(
+    (k: string) => {
+      setRunning((prev) => {
+        if (prev === k) return prev;
+        if (prev) logSession(prev, sessionRef.current);
+        setSession(0);
+        setTasks((ts) =>
+          ts.map((t) =>
+            t.k === k ? { ...t, sessions: t.sessions + 1, last: nowHM(), done: false } : t,
+          ),
+        );
+        return k;
+      });
+    },
+    [logSession],
+  );
+  const stop = useCallback(() => {
+    setRunning((prev) => {
+      if (prev) logSession(prev, sessionRef.current);
+      return null;
+    });
+  }, [logSession]);
+  const toggleActive = useCallback(() => {
+    if (runningKey) {
+      stop();
+      return;
+    }
+    if (active) startTask(active.k);
+  }, [runningKey, active, startTask, stop]);
+  useEffect(() => {
+    toggleActiveRef.current = toggleActive;
+  }, [toggleActive]);
+
+  const complete = (k: string) => {
+    if (k === runningKey) stop();
+    setTasks((ts) => ts.map((t) => (t.k === k ? { ...t, done: !t.done } : t)));
+  };
+  const del = (k: string) => {
+    if (k === runningKey) stop();
+    setTasks((ts) => ts.filter((t) => t.k !== k));
+  };
+
+  const addTask = (name: string, cat: string) => {
+    const nm = name.trim();
+    if (!nm) return;
+    const c = cat || "未分類";
+    const k = "t" + Date.now() + Math.random().toString(36).slice(2, 5);
+    setTasks((ts) => [
+      ...ts,
+      { k, name: nm, cat: c, color: catColor(c), todaySec: 0, totalSec: 0, sessions: 0, last: "—", done: false },
+    ]);
+    setNewName("");
+    setNewCat("未分類");
+    setAdding(false);
+  };
+  const addManyTasks = (list: { name: string; cat: string }[]) => {
+    setTasks((ts) => {
+      const have = new Set(ts.map((t) => t.name));
+      const add = list
+        .filter((x) => !have.has(x.name))
+        .map((x, i) => ({
+          k: "t" + Date.now() + i,
+          name: x.name,
+          cat: x.cat,
+          color: catColor(x.cat),
+          todaySec: 0,
+          totalSec: 0,
+          sessions: 0,
+          last: "—",
+          done: false,
+        }));
+      return [...ts, ...add];
+    });
+    setScreen("main");
+  };
+
+  const editTime = (k: string) => setEditKey(k);
+  const saveTask = (k: string, patch: Partial<Task>) => {
+    setTasks((ts) => ts.map((x) => (x.k === k ? { ...x, ...patch } : x)));
+    setEditKey(null);
+  };
+
+  const addRoutine = (r: { name: string; cat: string }) =>
+    setRoutines((rs) => [...rs, { id: "r" + Date.now(), name: r.name, cat: r.cat }]);
+  const delRoutine = (id: string) => setRoutines((rs) => rs.filter((r) => r.id !== id));
+
+  const flashNote = useCallback((text: string, icon = "check") => {
+    setNote({ text, icon });
+    if (noteTimer.current) clearTimeout(noteTimer.current);
+    noteTimer.current = window.setTimeout(() => setNote(null), 2600);
+  }, []);
+
+  const closeApp = () => {
+    if (pending.length > 0) {
+      setShowCarry(true);
+    } else {
+      flashNote("今日のタスクはすべて完了！");
+      void hideToTray();
+    }
+  };
+  const carryMove = (keys: string[]) => {
+    const set = new Set(keys);
+    setTasks((ts) => ts.filter((t) => !set.has(t.k)));
+    setShowCarry(false);
+    flashNote(`${keys.length} 件を明日へ繰り越しました`);
+    void hideToTray();
+  };
+  const carryDiscard = (keys: string[]) => {
+    const set = new Set(keys);
+    setTasks((ts) => ts.filter((t) => !set.has(t.k)));
+    setShowCarry(false);
+    flashNote(`${keys.length} 件を破棄しました`);
+    void hideToTray();
+  };
+  const previewReminder = () => {
+    setScreen("main");
+    flashNote(`計測リマインド例：${settings.elapsedEveryMin}分が経過しました`, "bell");
+  };
+
+  const manualCheckUpdate = async () => {
+    setScreen("main");
+    flashNote("アップデートを確認中…", "download-cloud");
+    const u = await checkForUpdate();
+    if (u) {
+      setUpdate(u);
+      flashNote(`新しいバージョン ${u.version} が利用可能です`, "download-cloud");
+    } else {
+      flashNote(IS_TAURI ? "お使いのバージョンが最新です" : "更新確認はアプリ版でのみ可能です", "check");
+    }
+  };
+  const installUpdate = async () => {
+    if (!update) return;
+    setUpdating(true);
+    try {
+      await installUpdateAndRelaunch(update);
+    } catch (e) {
+      console.error(e);
+      setUpdating(false);
+      flashNote("更新に失敗しました", "x");
+    }
+  };
+
+  // --- keyboard (browser fallback + in-window shortcuts) ----------------
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = ((e.target as HTMLElement)?.tagName || "").toLowerCase();
+      const typing = tag === "input" || tag === "textarea";
+      // Under Tauri the global shortcut is handled natively; only the browser
+      // fallback needs the in-window combo so we avoid a double toggle.
+      if (!IS_TAURI && settings.globalShortcut && matchShortcut(e, settings.globalShortcutKeys)) {
+        e.preventDefault();
+        toggleActive();
+        return;
+      }
+      if (e.key === "Escape") {
+        if (showCarry) {
+          setShowCarry(false);
+          return;
+        }
+        if (editKey) {
+          setEditKey(null);
+          return;
+        }
+        if (screen !== "main") {
+          setScreen("main");
+          return;
+        }
+        setFiltering(false);
+        setQuery("");
+        setAdding(false);
+        setNewName("");
+        setToast(false);
+        return;
+      }
+      if (screen !== "main" || editKey || typing) return;
+      if (e.code === "Space") {
+        e.preventDefault();
+        toggleActive();
+        return;
+      }
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setNav((i) => Math.min(actives.length - 1, i + 1));
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setNav((i) => Math.max(0, i - 1));
+        return;
+      }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        if (active) startTask(active.k);
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && (e.key === "n" || e.key === "N")) {
+        e.preventDefault();
+        setAdding(true);
+        return;
+      }
+      if (e.key === "/") {
+        e.preventDefault();
+        setFiltering(true);
+        return;
+      }
+      if (/^[1-9]$/.test(e.key)) {
+        const idx = parseInt(e.key, 10) - 1;
+        if (actives[idx]) {
+          setNav(idx);
+          startTask(actives[idx].k);
+          setFlashKey(actives[idx].k);
+          setTimeout(() => setFlashKey(null), 500);
+        }
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [actives, active, toggleActive, startTask, screen, editKey, settings]);
+
+  useEffect(() => {
+    if (filtering && filterRef.current) filterRef.current.focus();
+  }, [filtering]);
+  useEffect(() => {
+    if (adding && addRef.current) addRef.current.focus();
+  }, [adding]);
+
+  // Brief opaque card while the persisted state loads (avoids a transparent flash).
+  if (!ready) {
+    return <div className={rootCls} data-accent={accent} />;
+  }
+
+  const toastStack = (
+    <>
+      {toast && (
+        <div className="tt-toast">
+          <Ico n="bell" className="ti" />
+          <span>
+            {active ? active.name : "計測中"}・<b>{Math.floor(sessionSec / 60)}分</b>経過しています
+          </span>
+          <button className="x" onClick={() => setToast(false)}>
+            <Ico n="x" />
+          </button>
+        </div>
+      )}
+      {note && (
+        <div className="tt-toast">
+          <Ico n={note.icon} className="ti" />
+          <span>{note.text}</span>
+          <button className="x" onClick={() => setNote(null)}>
+            <Ico n="x" />
+          </button>
+        </div>
+      )}
+      {update && (
+        <div className="tt-toast">
+          <Ico n="download-cloud" className="ti" />
+          <span>
+            新しいバージョン <b>{update.version}</b> が利用可能です
+          </span>
+          <button
+            className="tt-btn tt-btn-run"
+            style={{ marginLeft: "auto", padding: "5px 12px", fontSize: 12 }}
+            disabled={updating}
+            onClick={installUpdate}
+          >
+            {updating ? "更新中…" : "更新"}
+          </button>
+          <button className="x" onClick={() => setUpdate(null)}>
+            <Ico n="x" />
+          </button>
+        </div>
+      )}
+    </>
+  );
+
+  /* ---------- task editor ---------- */
+  if (editKey) {
+    const t = tasks.find((x) => x.k === editKey);
+    if (t) {
+      return (
+        <div className={rootCls} data-accent={accent}>
+          <TitleBar subtitle="タスクを編集" />
+          <TaskEditor
+            task={t}
+            onSave={saveTask}
+            onDelete={(k) => {
+              del(k);
+              setEditKey(null);
+            }}
+            onClose={() => setEditKey(null)}
+          />
+        </div>
+      );
+    }
+  }
+
+  /* ---------- overlay screens ---------- */
+  if (screen === "morning") {
+    return (
+      <div className={rootCls} data-accent={accent}>
+        <TitleBar subtitle="朝の準備" />
+        <MorningFlow
+          routines={routines}
+          existingNames={existingNames}
+          onAddToday={addManyTasks}
+          onClose={() => setScreen("main")}
+          onManage={() => setScreen("routines")}
+        />
+      </div>
+    );
+  }
+  if (screen === "routines") {
+    return (
+      <div className={rootCls} data-accent={accent}>
+        <TitleBar subtitle="ルーティン管理" />
+        <RoutineManager
+          routines={routines}
+          onAdd={addRoutine}
+          onDelete={delRoutine}
+          onClose={() => setScreen("main")}
+        />
+      </div>
+    );
+  }
+  if (screen === "calendar") {
+    return (
+      <div className={rootCls} data-accent={accent}>
+        <TitleBar subtitle="カレンダー" />
+        <Calendar onClose={() => setScreen("main")} />
+      </div>
+    );
+  }
+  if (screen === "stats") {
+    return (
+      <div className={rootCls} data-accent={accent}>
+        <TitleBar subtitle="集計" />
+        <Stats onClose={() => setScreen("main")} />
+      </div>
+    );
+  }
+  if (screen === "settings") {
+    return (
+      <div className={rootCls} data-accent={accent}>
+        <TitleBar subtitle="設定" />
+        <SettingsScreen
+          settings={settings}
+          routines={routines}
+          onChange={setSettings}
+          onManageRoutines={() => setScreen("routines")}
+          onPreview={previewReminder}
+          onCheckUpdate={manualCheckUpdate}
+          appVersion={APP_VERSION}
+          onReset={() => {
+            setTasks(TASK_SEED.map((t) => ({ ...t })));
+            setRunning(null);
+            setSession(0);
+            setNav(0);
+            setScreen("main");
+          }}
+          onClose={() => setScreen("main")}
+        />
+      </div>
+    );
+  }
+
+  /* ---------- empty ---------- */
+  if (tasks.length === 0) {
+    return (
+      <div className={rootCls} data-accent={accent}>
+        <TitleBar />
+        <StatusBar live={false} />
+        <div className="tt-empty">
+          <span className="ico">
+            <Ico n="coffee" />
+          </span>
+          <h3>今日のタスクがありません</h3>
+          <p>朝のルーティンから今日のタスクを準備するか、新しいタスクを追加して計測を始めましょう。</p>
+          <div className="cta-row">
+            <button className="tt-btn tt-btn-run block" onClick={() => setScreen("morning")}>
+              <Ico n="sunrise" /> 朝のタスクを準備
+            </button>
+            <button className="tt-btn tt-btn-ghost block" onClick={() => setScreen("routines")}>
+              <Ico n="rotate-cw" /> ルーティンを管理
+            </button>
+          </div>
+        </div>
+        {toastStack}
+        <Footer
+          onReport={() => setScreen("stats")}
+          onCalendar={() => setScreen("calendar")}
+          onSettings={() => setScreen("settings")}
+        />
+      </div>
+    );
+  }
+
+  /* ---------- main ---------- */
+  return (
+    <div className={rootCls} data-accent={accent}>
+      <TitleBar onCloseApp={closeApp} />
+      <StatusBar live={live} />
+
+      <div className={"tt-b-hero" + (live ? " live" : "")}>
+        {active ? (
+          <span className="tt-b-task">
+            <span className="dot" style={{ background: active.color }}></span>
+            <span className="nm">{active.name}</span>
+            <span className="tag">· {active.cat}</span>
+            <button className="tt-b-editbtn" title="時間を編集・追記" onClick={() => editTime(active.k)}>
+              <Ico n="pencil" />
+            </button>
+          </span>
+        ) : (
+          <span className="tt-b-task">
+            <span className="nm" style={{ color: "var(--muted-foreground)", fontWeight: 500 }}>
+              タスクを選択
+            </span>
+          </span>
+        )}
+
+        <div className={"tt-b-big mono " + (live ? "live" : "idle")}>
+          {live ? hms(sessionSec) : "0:00:00"}
+        </div>
+
+        <div className="tt-b-sub">
+          <span>
+            今日 <b className="mono">{hm(todayTotal)}</b>
+          </span>
+          {active && (
+            <span>
+              本日 <b>{active.sessions} 回目</b>
+            </span>
+          )}
+        </div>
+
+        <div className="tt-b-cta">
+          {live ? (
+            <button className="tt-btn tt-btn-stop block" onClick={stop}>
+              <Ico n="square" /> 停止{" "}
+              <kbd style={{ opacity: 0.6, background: "rgba(255,255,255,.18)", color: "#fff", borderColor: "transparent" }}>
+                Space
+              </kbd>
+            </button>
+          ) : (
+            <button className="tt-btn tt-btn-run block" onClick={toggleActive} disabled={!active}>
+              <Ico n="play" /> 開始 <kbd style={{ opacity: 0.7 }}>Space</kbd>
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="tt-list scroll" style={{ marginTop: 8, paddingBottom: 8 }}>
+        <div className="tt-sec">
+          <span className="lbl">
+            今日のタスク<span className="count">{actives.length}</span>
+          </span>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button className="tt-newbtn" onClick={() => setScreen("morning")} title="朝の準備">
+              <Ico n="sunrise" />
+            </button>
+            <button className="tt-newbtn" onClick={() => setFiltering((f) => !f)} title="絞り込み">
+              <Ico n="search" /> <kbd>/</kbd>
+            </button>
+            <button className="tt-newbtn" onClick={() => setAdding(true)}>
+              <Ico n="plus" /> 新規 <kbd>Ctrl N</kbd>
+            </button>
+          </div>
+        </div>
+
+        {filtering && (
+          <div className="tt-inline">
+            <Ico n="search" />
+            <input
+              ref={filterRef}
+              value={query}
+              placeholder="タスク名で絞り込み"
+              onChange={(e) => setQuery(e.target.value)}
+            />
+            <kbd className="esc">Esc</kbd>
+          </div>
+        )}
+        {adding && (
+          <div className="tt-addbox">
+            <div className="tt-inline" style={{ margin: 0, border: 0, padding: "2px 0" }}>
+              <Ico n="plus" />
+              <input
+                ref={addRef}
+                value={newName}
+                placeholder="新しいタスク名を入力"
+                onChange={(e) => setNewName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") addTask(newName, newCat);
+                  if (e.key === "Escape") {
+                    setAdding(false);
+                    setNewName("");
+                  }
+                }}
+              />
+              <button
+                className="tt-inline-add"
+                onClick={() => addTask(newName, newCat)}
+                disabled={!newName.trim()}
+              >
+                <Ico n="corner-down-left" />
+              </button>
+            </div>
+            <CategoryPicker value={newCat} onChange={setNewCat} />
+          </div>
+        )}
+
+        {actives.map((t, i) => {
+          const isRun = t.k === runningKey;
+          const isNav = !isRun && i === clampedNav;
+          return (
+            <div
+              key={t.k}
+              className={
+                "tt-row has-num" +
+                (isRun ? " running" : isNav ? " selected" : "") +
+                (flashKey === t.k ? " nav-flash" : "")
+              }
+              onClick={() => setNav(i)}
+            >
+              <span className="swatch" style={{ background: t.color }}></span>
+              <span className="rnum">{i + 1}</span>
+              <div className="tt-rmain">
+                <div className="tt-rtop">
+                  <span className="tt-rname">{t.name}</span>
+                  <span className="tt-tag">{t.cat}</span>
+                </div>
+                <div className="tt-rmeta">
+                  {isRun ? (
+                    <MiniLive />
+                  ) : (
+                    <>
+                      <span>今日 {hm(t.todaySec)}</span>
+                      <span className="sep"></span>
+                    </>
+                  )}
+                  <span>累計 {hhmm(t.totalSec)}</span>
+                  <span className="sep"></span>
+                  <span>{t.sessions} 回</span>
+                  <span className="sep"></span>
+                  <span>{isRun ? nowHM() : t.last}</span>
+                </div>
+              </div>
+              <div className="tt-rright">
+                <div className="tt-acts">
+                  {isRun ? (
+                    <button
+                      className="del"
+                      title="停止"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        stop();
+                      }}
+                    >
+                      <Ico n="square" />
+                    </button>
+                  ) : (
+                    <button
+                      className="play"
+                      title="開始"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        startTask(t.k);
+                      }}
+                    >
+                      <Ico n="play" />
+                    </button>
+                  )}
+                  <button
+                    title="編集"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEditKey(t.k);
+                    }}
+                  >
+                    <Ico n="pencil" />
+                  </button>
+                  <button
+                    title="完了"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      complete(t.k);
+                    }}
+                  >
+                    <Ico n="check" />
+                  </button>
+                  <button
+                    className="del"
+                    title="削除"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      del(t.k);
+                    }}
+                  >
+                    <Ico n="x" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+
+        {dones.length > 0 && <div className="tt-done-div">完了 {dones.length}</div>}
+        {dones.map((t) => (
+          <div key={t.k} className="tt-row has-num done" onClick={() => complete(t.k)}>
+            <span className="swatch" style={{ background: t.color }}></span>
+            <span className="rnum">
+              <Ico n="check" />
+            </span>
+            <div className="tt-rmain">
+              <div className="tt-rtop">
+                <span className="tt-rname">{t.name}</span>
+                <span className="tt-tag">{t.cat}</span>
+              </div>
+              <div className="tt-rmeta">
+                <span>今日 {hm(t.todaySec)}</span>
+                <span className="sep"></span>
+                <span>累計 {hhmm(t.totalSec)}</span>
+              </div>
+            </div>
+            <div className="tt-rright">
+              <div className="tt-acts">
+                <button
+                  title="戻す"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    complete(t.k);
+                  }}
+                >
+                  <Ico n="rotate-ccw" />
+                </button>
+                <button
+                  className="del"
+                  title="削除"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    del(t.k);
+                  }}
+                >
+                  <Ico n="x" />
+                </button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {toastStack}
+
+      {showCarry && (
+        <CarryoverDialog
+          tasks={pending}
+          onMove={carryMove}
+          onDiscard={carryDiscard}
+          onClose={() => setShowCarry(false)}
+        />
+      )}
+
+      <Footer
+        onReport={() => setScreen("stats")}
+        onCalendar={() => setScreen("calendar")}
+        onSettings={() => setScreen("settings")}
+      />
+    </div>
+  );
+}

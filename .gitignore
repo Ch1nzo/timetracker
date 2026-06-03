@@ -1,0 +1,26 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+dist-ssr/
+
+# tauri
+src-tauri/target/
+src-tauri/gen/
+
+# logs / editor
+*.log
+.DS_Store
+.vscode/
+.idea/
+
+# local handoff bundle (design source — kept out of the app build)
+_handoff/
+timetracker-handoff.zip
+
+# WSL alternate-data-stream metadata
+*:Zone.Identifier
+
+# generated icon intermediate (reproducible via scripts/generate-icon.mjs)
+scripts/.icon-source.png

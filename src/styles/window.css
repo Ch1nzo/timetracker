@@ -1,0 +1,27 @@
+/* The Tauri window is frameless + transparent; the .tt card fills it and the
+   rounded corners show through. */
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  width: 100%;
+}
+html,
+body {
+  background: transparent;
+  overflow: hidden;
+}
+body {
+  font-family: "Geist", "Noto Sans JP", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+#root {
+  display: flex;
+}
+/* Inputs and editable fields should still allow text selection. */
+input,
+textarea {
+  user-select: text;
+}
