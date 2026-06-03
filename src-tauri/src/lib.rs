@@ -88,7 +88,19 @@ pub fn run() {
         kind: tauri_plugin_sql::MigrationKind::Up,
     }];
 
-    let mut builder = tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+
+    // Single-instance must be registered first: a second launch (e.g. from the
+    // Start menu while the app sits in the tray) just reveals the running window
+    // instead of spawning a duplicate process + tray icon.
+    #[cfg(desktop)]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            focus_main(app);
+        }));
+    }
+
+    builder = builder
         .plugin(
             tauri_plugin_sql::Builder::default()
                 .add_migrations("sqlite:timetracker.db", migrations)
