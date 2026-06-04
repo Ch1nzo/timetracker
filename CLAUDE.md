@@ -74,6 +74,7 @@ Claude Design ハンドオフ（Task Timer ①メイン・方向B）を忠実に
 - タイトルバーのドラッグは `data-tauri-drag-region` 属性 +（capabilities の `core:window:allow-start-dragging`）で成立している
 - Vite 設定の変更禁止項目: port 1420 / strictPort / `assetsInlineLimit: 4096`（約 5MB の Noto Sans JP を inline させないため）
 - **Tailwind v4 導入済み**（`@tailwindcss/vite` プラグイン + `src/styles/tailwind.css`）。ただし **preflight（全体リセット）は意図的に除外**（theme + utilities のみ）— 手書きデザインを壊さないため。`tailwind.css` に preflight を戻さない。Tailwind utility は新規マークアップ向けで、既存 `.tt-*` スタイル（unlayered）が優先される。ビジュアルの正は引き続き `src/styles/`
+- **既存 CSS の全面 Tailwind 化（@apply / インライン utility）は検証の上で見送り済み**。`@apply` 全面書き換えは計算スタイル・目視では完全一致だが、Playwright 画素比較で**文字のアンチエイリアス方式差（知覚不能だが byte 単位で約13%相違）**が出る。「デザインを1px も変えない」要件のため既存デザインは**手書き CSS のまま**とする方針。再依頼時はこのトレードオフ（byte 不変 vs 全面 Tailwind 化）を最初に確認すること
 
 ## バージョンアップ手順
 
