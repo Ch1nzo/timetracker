@@ -25,25 +25,9 @@ import {
   syncGlobalShortcut,
 } from "./lib/tauri";
 import type { Note, Routine, Settings, Task, TimeEntry } from "./lib/types";
+import { computeTimer, daySegments, type DaySeg } from "./lib/timer";
 
-const APP_VERSION = "0.5.0";
-
-/** Split a wall-clock [startMs, endMs) span into per-calendar-day segments so a
- *  session that crosses midnight is attributed to the correct date(s). */
-function daySegments(startMs: number, endMs: number): { date: string; sec: number }[] {
-  const segs: { date: string; sec: number }[] = [];
-  let cur = startMs;
-  let guard = 0;
-  while (cur < endMs && guard++ < 800) {
-    const d = new Date(cur);
-    const nextMid = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime();
-    const segEnd = Math.min(endMs, nextMid);
-    const sec = Math.floor((segEnd - cur) / 1000);
-    if (sec > 0) segs.push({ date: ymd(d), sec });
-    cur = nextMid;
-  }
-  return segs;
-}
+const APP_VERSION = "0.5.1";
 
 import { TitleBar } from "./components/TitleBar";
 import { StatusBar } from "./components/StatusBar";
@@ -245,11 +229,10 @@ export function App() {
   }, []);
 
   // --- session logging (real time_entries) ------------------------------
-  // Log a measured span [startMs, endMs) for a task, split across calendar days
-  // so a session crossing midnight lands on the right date(s). Returns a promise
-  // that resolves once the rows are written (awaited on quit; ignored elsewhere).
-  const logRange = useCallback((task: Task, startMs: number, endMs: number): Promise<void> => {
-    const writes = daySegments(startMs, endMs).map((seg, i) => {
+  // Write pre-computed per-day segments for a task. Returns a promise that
+  // resolves once the rows are written (awaited on quit; ignored elsewhere).
+  const writeSegments = useCallback((task: Task, segs: DaySeg[]): Promise<void> => {
+    const writes = segs.map((seg, i) => {
       const entry: TimeEntry = {
         id: "te" + Date.now().toString(36) + i + Math.random().toString(36).slice(2, 6),
         date: seg.date,
@@ -264,6 +247,13 @@ export function App() {
     });
     return Promise.allSettled(writes).then(() => {});
   }, []);
+  // Log a measured span [startMs, endMs) for a task, split across calendar days
+  // so a session crossing midnight lands on the right date(s).
+  const logRange = useCallback(
+    (task: Task, startMs: number, endMs: number): Promise<void> =>
+      writeSegments(task, daySegments(startMs, endMs)),
+    [writeSegments],
+  );
   // Flush the currently-running session (from its anchor up to `endMs`/now).
   const logRunning = useCallback(
     (key: string, endMs?: number): Promise<void> => {
@@ -277,70 +267,58 @@ export function App() {
   );
 
   // --- wall-clock timer sync --------------------------------------------
-  // Derives elapsed time from Date.now() instead of counting ticks, so it stays
-  // correct even when a hidden/tray webview throttles its timers. Also handles
-  // the midnight rollover for the per-task "today" counters.
+  // Delegates the timing math to the pure computeTimer() core (unit-tested in
+  // tests/timer.test.mjs), then applies the React/SQLite side-effects here.
   const syncTimer = useCallback(() => {
     const now = Date.now();
-    const today = ymd(new Date(now));
     const runKey = runningKeyRef.current;
-    const start = startedAtRef.current;
-
-    if (!runKey || start == null) {
-      // Idle: just roll "today" over at midnight.
-      if (today !== todayDateRef.current) {
-        todayDateRef.current = today;
-        setTasks((ts) => ts.map((t) => (t.todaySec ? { ...t, todaySec: 0 } : t)));
-      }
-      return;
-    }
-
-    const elapsed = Math.floor((now - start) / 1000);
-    const rolled = today !== todayDateRef.current;
-    if (elapsed <= lastElapsedRef.current && !rolled) return; // nothing new
-
-    let totalDelta = elapsed - lastElapsedRef.current;
-    if (totalDelta < 0) totalDelta = 0;
-
-    if (rolled) {
-      // Flush the pre-midnight portion to its real date(s), then re-anchor the
-      // session to today's midnight so "today" only counts today's seconds.
-      const midnight = new Date(now);
-      midnight.setHours(0, 0, 0, 0);
-      logRunning(runKey, midnight.getTime());
-      startedAtRef.current = midnight.getTime();
-      reminderBucketRef.current = 0;
-      todayDateRef.current = today;
-    }
-
-    const todayElapsed = Math.floor((now - startedAtRef.current!) / 1000);
-    lastElapsedRef.current = rolled ? todayElapsed : elapsed;
-    setSession(rolled ? todayElapsed : elapsed);
-    setTasks((ts) =>
-      ts.map((t) => {
-        if (t.k !== runKey) return rolled ? { ...t, todaySec: 0 } : t;
-        return {
-          ...t,
-          totalSec: t.totalSec + totalDelta,
-          todaySec: rolled ? todayElapsed : t.todaySec + totalDelta,
-        };
-      }),
-    );
-
-    // Elapsed reminder — fire once per crossed N-minute boundary (wall-clock).
+    const running = !!runKey && startedAtRef.current != null;
     const s = settingsRef.current;
-    if (s.elapsedReminder) {
-      const everyMin = Math.max(1, s.elapsedEveryMin || 25);
-      const ref = rolled ? todayElapsed : elapsed;
-      const bucket = Math.floor(ref / (everyMin * 60));
-      if (bucket > reminderBucketRef.current) {
-        reminderBucketRef.current = bucket;
-        setToast(true);
-        const t = tasksRef.current.find((x) => x.k === runKey);
-        void notify(t?.name ?? "計測中", `${bucket * everyMin}分が経過しました`);
-      }
+    const r = computeTimer(
+      now,
+      running,
+      {
+        startedAt: startedAtRef.current ?? now,
+        lastElapsed: lastElapsedRef.current,
+        todayDate: todayDateRef.current,
+        reminderBucket: reminderBucketRef.current,
+      },
+      { everyMin: Math.max(1, s.elapsedEveryMin || 25), elapsedReminder: s.elapsedReminder },
+    );
+    if (!r.changed) return;
+
+    // Flush the pre-midnight portion of the session to its real date(s).
+    if (r.logSegments.length && runKey) {
+      const t = tasksRef.current.find((x) => x.k === runKey);
+      if (t) void writeSegments(t, r.logSegments);
     }
-  }, [logRunning]);
+
+    // Apply the updated anchor.
+    if (running) startedAtRef.current = r.startedAt;
+    lastElapsedRef.current = r.lastElapsed;
+    todayDateRef.current = r.todayDate;
+    reminderBucketRef.current = r.reminderBucket;
+
+    if (running) setSession(r.sessionSec);
+    if (running || r.resetAllToday) {
+      setTasks((ts) =>
+        ts.map((t) => {
+          if (running && t.k === runKey) {
+            const todaySec =
+              r.runningTodayValue != null ? r.runningTodayValue : t.todaySec + r.runningTodayDelta;
+            return { ...t, totalSec: t.totalSec + r.totalDelta, todaySec };
+          }
+          return r.resetAllToday && t.todaySec ? { ...t, todaySec: 0 } : t;
+        }),
+      );
+    }
+
+    if (r.fireReminder) {
+      setToast(true);
+      const t = tasksRef.current.find((x) => x.k === runKey);
+      void notify(t?.name ?? "計測中", `${r.reminderMinutes}分が経過しました`);
+    }
+  }, [writeSegments]);
 
   const startTask = useCallback(
     (k: string) => {
