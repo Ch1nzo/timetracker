@@ -357,8 +357,8 @@ export function Settings({
             )}
             <div className="tt-set-row clickable" onClick={onReset}>
               <div className="info">
-                <div className="t">サンプルデータにリセット</div>
-                <div className="d">今日のタスクを初期状態に戻す</div>
+                <div className="t">今日のタスクをクリア</div>
+                <div className="d">タスク一覧を空にする（計測履歴は残ります）</div>
               </div>
               <div className="ctrl chev">
                 <Ico n="rotate-ccw" />

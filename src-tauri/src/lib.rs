@@ -7,12 +7,19 @@
 //   * Register a global start/stop shortcut that works from any app.
 //   * Expose a few commands the frontend calls when settings change.
 
+use std::sync::Mutex;
+
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{Emitter, Manager, WindowEvent};
+use tauri::{Emitter, Manager, State, WindowEvent};
 
 #[cfg(desktop)]
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+
+/// Whether closing the window keeps the app running in the tray (true) or fully
+/// quits it (false). Mirrors the "閉じても計測を続ける" setting; the frontend
+/// pushes changes via `set_close_to_tray`.
+struct CloseToTray(Mutex<bool>);
 
 /// SQLite schema. `app_state` holds JSON blobs for the live working set,
 /// settings, routines and categories; `time_entries` is the real measured-
@@ -56,6 +63,14 @@ fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
 
+/// Update the close-to-tray preference from the frontend settings.
+#[tauri::command]
+fn set_close_to_tray(state: State<'_, CloseToTray>, keep: bool) {
+    if let Ok(mut g) = state.0.lock() {
+        *g = keep;
+    }
+}
+
 /// Re-register the global start/stop shortcut from the current settings.
 /// Called by the frontend whenever the user changes the combo or toggles it.
 #[cfg(desktop)]
@@ -89,6 +104,9 @@ pub fn run() {
     }];
 
     let mut builder = tauri::Builder::default();
+
+    // Close-to-tray preference (default: keep running in the tray on close).
+    builder = builder.manage(CloseToTray(Mutex::new(true)));
 
     // Single-instance must be registered first: a second launch (e.g. from the
     // Start menu while the app sits in the tray) just reveals the running window
@@ -133,6 +151,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             show_main_window,
             quit_app,
+            set_close_to_tray,
             update_global_shortcut
         ])
         .setup(|app| {
@@ -178,12 +197,24 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // Closing the window hides it to the tray; the webview (and the
-            // running timer) stays alive so measurement continues in the
-            // background. A real quit goes through the tray menu.
+            // Closing the window normally hides it to the tray; the webview (and
+            // the running timer) stays alive so measurement continues in the
+            // background. When the user turned "閉じても計測を続ける" OFF, we
+            // instead ask the frontend to flush the running session and quit.
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
-                let _ = window.hide();
+                let keep = window
+                    .try_state::<CloseToTray>()
+                    .map(|s| s.0.lock().map(|g| *g).unwrap_or(true))
+                    .unwrap_or(true);
+                if keep {
+                    let _ = window.hide();
+                } else {
+                    // Let the frontend persist + log the in-progress session,
+                    // then it calls quit_app (app.exit). Show the window so the
+                    // user sees any final state if the flush takes a moment.
+                    let _ = window.emit("app-quit-requested", ());
+                }
             }
         })
         .run(tauri::generate_context!())

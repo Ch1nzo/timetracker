@@ -1,8 +1,13 @@
 name: release
 
-# Push a version tag (e.g. v0.4.0) to build installers for every OS and
-# publish them — together with the updater manifest (latest.json) — as a
-# GitHub Release. The in-app updater points at this release's latest.json.
+# Push a version tag (e.g. v0.5.0) to release automatically:
+#   1) create-release — draft release + auto-generated release notes (変更点)
+#   2) build          — installers for every OS attach to that release,
+#                       together with signed updater artifacts + latest.json
+#   3) publish        — once ALL builds succeed the release goes live, so the
+#                       in-app updater (releases/latest/download/latest.json)
+#                       resolves it immediately. If any build fails the
+#                       release stays a draft and nothing is published.
 on:
   push:
     tags:
@@ -13,7 +18,46 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  create-release:
+    runs-on: ubuntu-22.04
+    outputs:
+      release_id: ${{ steps.create.outputs.result }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create draft release with generated notes
+        id: create
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            // Tag from the push; on a manual run, derive it from tauri.conf.json.
+            const tag = context.ref.startsWith('refs/tags/')
+              ? context.ref.replace('refs/tags/', '')
+              : 'v' + JSON.parse(require('fs').readFileSync('src-tauri/tauri.conf.json', 'utf8')).version;
+            // 変更点（前リリースからのコミット/PR一覧）を自動生成する。
+            const notes = await github.rest.repos.generateReleaseNotes({
+              owner, repo,
+              tag_name: tag,
+              target_commitish: context.sha,
+            });
+            const release = await github.rest.repos.createRelease({
+              owner, repo,
+              tag_name: tag,
+              target_commitish: context.sha,
+              name: `TimeTracker ${tag}`,
+              body: [
+                '自動ビルドされたインストーラです。Windows は NSIS (.exe)、macOS は .dmg、Linux は AppImage/.deb。',
+                '',
+                notes.data.body,
+              ].join('\n'),
+              draft: true,
+              prerelease: false,
+            });
+            return release.data.id;
+
+  build:
+    needs: create-release
     strategy:
       fail-fast: false
       matrix:
@@ -64,7 +108,7 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Build and release
+      - name: Build and upload installers
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -74,10 +118,21 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: "TimeTracker ${{ github.ref_name }}"
-          releaseBody: "自動ビルドされたインストーラです。Windows は NSIS (.exe)、macOS は .dmg、Linux は AppImage/.deb。"
-          releaseDraft: true
-          prerelease: false
-          includeUpdaterJson: true
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          uploadUpdaterJson: true
           args: ${{ matrix.args }}
+
+  publish:
+    needs: [create-release, build]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Publish the release (all installers attached)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.updateRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: ${{ needs.create-release.outputs.release_id }},
+              draft: false,
+            });

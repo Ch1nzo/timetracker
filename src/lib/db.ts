@@ -2,7 +2,7 @@
 //   * app_state  — JSON blobs for the live working set ("main") and categories.
 //   * time_entries — the real measured-session log behind calendar + stats.
 import Database from "@tauri-apps/plugin-sql";
-import { catColor, hydrateCategories, registerCatPersist } from "./categories";
+import { hydrateCategories, registerCatPersist } from "./categories";
 import { ymd } from "./format";
 import type { Category, MainState, TimeEntry } from "./types";
 
@@ -89,89 +89,11 @@ export async function teDelete(id: string): Promise<void> {
   await db.execute("DELETE FROM time_entries WHERE id = $1", [id]);
 }
 
-async function teCount(): Promise<number> {
-  const db = await getDb();
-  const rows = await db.select<{ n: number }[]>("SELECT COUNT(*) AS n FROM time_entries");
-  return rows[0]?.n ?? 0;
-}
-
-// --- demo history seed (relative to the real current date) -------------
-const mulberry32 = (a: number) => () => {
-  a |= 0;
-  a = (a + 0x6d2b79f5) | 0;
-  let t = Math.imul(a ^ (a >>> 15), 1 | a);
-  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-};
-
-const POOL = [
-  { name: "仕様書レビュー", cat: "プロダクト" },
-  { name: "API 実装", cat: "開発" },
-  { name: "デザインレビュー", cat: "デザイン" },
-  { name: "定例ミーティング", cat: "会議" },
-  { name: "月次レポート作成", cat: "経営" },
-  { name: "競合調査", cat: "リサーチ" },
-  { name: "メール返信", cat: "雑務" },
-  { name: "コードレビュー", cat: "開発" },
-  { name: "1on1", cat: "会議" },
-];
-
-function seedEntries(): TimeEntry[] {
-  const out: TimeEntry[] = [];
-  let id = 1;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const start = new Date(today);
-  start.setDate(start.getDate() - 16);
-  const end = new Date(today);
-  end.setDate(end.getDate() + 10);
-
-  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-    const dow = d.getDay();
-    const rnd = mulberry32(
-      d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate(),
-    );
-    const future = d > today;
-    let n = dow === 0 || dow === 6 ? (rnd() < 0.5 ? 0 : 1) : 2 + Math.floor(rnd() * 3);
-    if (future) n = rnd() < 0.6 ? 0 : 1;
-    const used = new Set<string>();
-    for (let i = 0; i < n; i++) {
-      let p = POOL[0];
-      let g = 0;
-      do {
-        p = POOL[Math.floor(rnd() * POOL.length)];
-        g++;
-      } while (used.has(p.name) && g < 12);
-      used.add(p.name);
-      out.push({
-        id: "e" + id++,
-        date: ymd(d),
-        name: p.name,
-        cat: p.cat,
-        color: catColor(p.cat),
-        sec: Math.floor(25 + rnd() * 125) * 60,
-        source: "seed",
-        created_at: d.getTime() + i,
-      });
-    }
-  }
-  return out;
-}
-
-async function seedTimeEntriesIfEmpty(): Promise<void> {
-  if ((await teCount()) > 0) return;
-  const db = await getDb();
-  const entries = seedEntries();
-  // One multi-row transaction keeps the first launch snappy.
-  for (const e of entries) await teAdd(e);
-  void db; // (kept for clarity; teAdd opens its own handle)
-}
-
-/** Wire up persistence and seed demo data. Call once on startup. */
+/** Wire up category persistence. Call once on startup. No demo data is seeded —
+ *  tasks and measured history start empty and accumulate from real usage. */
 export async function initData(): Promise<void> {
   await getDb();
   registerCatPersist(saveCategories);
   const cats = await loadCategories();
   if (cats) hydrateCategories(cats);
-  await seedTimeEntriesIfEmpty();
 }

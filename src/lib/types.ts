@@ -49,6 +49,13 @@ export interface MainState {
   sessionSec: number;
   navIndex: number;
   savedAt: number;
+  /** Wall-clock epoch (ms) the running session started — null when idle.
+   *  Measurement is derived from this anchor, not from counting ticks, so it
+   *  stays correct even when the hidden webview throttles its timers. */
+  startedAt?: number | null;
+  /** The calendar day (YYYY-MM-DD) the per-task `todaySec` counters belong to.
+   *  Used to reset "today" at midnight while the app sits in the tray. */
+  todayDate?: string;
 }
 
 /** A single measured (or manually logged) session — the real history that

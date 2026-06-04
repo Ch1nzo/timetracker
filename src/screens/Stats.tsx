@@ -5,12 +5,12 @@ import { addDays, hm, parseYMD, startOfWeek, WD, ymd } from "../lib/format";
 import { teAll, todayStr } from "../lib/db";
 import type { TimeEntry } from "../lib/types";
 
-const ST_TODAY = todayStr();
-
 /** ⑦ 集計／グラフ — period switch, category donut, task ranking, daily trend, CSV. */
 export function Stats({ onClose }: { onClose: () => void }) {
+  // Recomputed on each open so "today" is correct even after a midnight rollover.
+  const today = todayStr();
   const [period, setPeriod] = useState<"day" | "week" | "month">("week");
-  const [anchor, setAnchor] = useState(ST_TODAY);
+  const [anchor, setAnchor] = useState(today);
   const [entries, setEntries] = useState<TimeEntry[]>([]);
 
   useEffect(() => {
@@ -79,11 +79,14 @@ export function Stats({ onClose }: { onClose: () => void }) {
   const trendMax = trend ? Math.max(1, ...trend.map((t) => t.sec)) : 1;
 
   const exportCsv = () => {
-    const head = "日付,タスク,カテゴリ,時間(分)";
+    // Export exact seconds (plus convenience minutes) so spreadsheet sums match
+    // the on-screen totals; quote name/category to stay CSV-safe.
+    const q = (v: string) => `"${String(v).replace(/"/g, '""')}"`;
+    const head = "日付,タスク,カテゴリ,時間(秒),時間(分)";
     const lines = rows
       .slice()
       .sort((a, b) => a.date.localeCompare(b.date))
-      .map((e) => `${e.date},${e.name},${e.cat},${Math.round(e.sec / 60)}`);
+      .map((e) => `${e.date},${q(e.name)},${q(e.cat)},${e.sec},${(e.sec / 60).toFixed(1)}`);
     const csv = "﻿" + [head, ...lines].join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -247,7 +250,7 @@ export function Stats({ onClose }: { onClose: () => void }) {
                   const d = parseYMD(t.s);
                   const showLab = period === "week" || d.getDate() % 5 === 1 || d.getDate() === 1;
                   return (
-                    <div key={t.s} className={"col" + (t.s === ST_TODAY ? " today" : "")}>
+                    <div key={t.s} className={"col" + (t.s === today ? " today" : "")}>
                       <div className="bar" style={{ height: (t.sec / trendMax) * 100 + "%" }}></div>
                       <span className="lab">
                         {period === "week" ? WD[d.getDay()] : showLab ? d.getDate() : ""}
