@@ -97,7 +97,6 @@ export function Settings({
   onManageRoutines,
   onClose,
   onReset,
-  onPreview,
   onCheckUpdate,
   appVersion,
 }: {
@@ -107,7 +106,6 @@ export function Settings({
   onManageRoutines: () => void;
   onClose: () => void;
   onReset: () => void;
-  onPreview: () => void;
   onCheckUpdate: () => void;
   appVersion: string;
 }) {
@@ -192,18 +190,9 @@ export function Settings({
                 </span>
               </div>
             </div>
-            <div className="tt-set-row clickable" onClick={onPreview}>
-              <div className="info">
-                <div className="t">通知をプレビュー</div>
-                <div className="d">リマインドの表示を試す</div>
-              </div>
-              <div className="ctrl preview">
-                <Ico n="bell" />
-              </div>
-            </div>
           </div>
           <div className="tt-set-note">
-            <Ico n="info" /> リマインドは Windows / macOS の標準通知として表示されます（アプリ内ではプレビューを表示）。
+            <Ico n="info" /> リマインドは Windows / macOS の標準通知として表示されます。
           </div>
         </div>
 

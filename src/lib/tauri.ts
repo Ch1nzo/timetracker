@@ -16,9 +16,58 @@ import {
 } from "@tauri-apps/plugin-autostart";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
+import { save } from "@tauri-apps/plugin-dialog";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 
 export const IS_TAURI =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
+export type SaveResult =
+  | { status: "saved"; path: string }
+  | { status: "downloaded" }
+  | { status: "cancelled" }
+  | { status: "error" };
+
+/** Save text to a file. Under Tauri: native save dialog → write → reveal the
+ *  file in the OS file manager. In the browser: fall back to a Blob download. */
+export async function saveTextFile(
+  suggestedName: string,
+  content: string,
+  mime = "text/csv;charset=utf-8",
+): Promise<SaveResult> {
+  if (!IS_TAURI) {
+    try {
+      const blob = new Blob([content], { type: mime });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = suggestedName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      return { status: "downloaded" };
+    } catch {
+      return { status: "error" };
+    }
+  }
+  try {
+    const path = await save({
+      defaultPath: suggestedName,
+      filters: [{ name: "CSV", extensions: ["csv"] }],
+    });
+    if (!path) return { status: "cancelled" };
+    await invoke("write_file", { path, contents: content });
+    try {
+      await revealItemInDir(path);
+    } catch {
+      /* reveal is best-effort */
+    }
+    return { status: "saved", path };
+  } catch {
+    return { status: "error" };
+  }
+}
 
 // --- window / tray -----------------------------------------------------
 export async function hideToTray(): Promise<void> {

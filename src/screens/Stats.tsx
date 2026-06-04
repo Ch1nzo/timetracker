@@ -3,15 +3,20 @@ import { Ico } from "../lib/icons";
 import { catColor } from "../lib/categories";
 import { addDays, hm, parseYMD, startOfWeek, WD, ymd } from "../lib/format";
 import { teAll, todayStr } from "../lib/db";
+import { saveTextFile } from "../lib/tauri";
 import type { TimeEntry } from "../lib/types";
 
-/** ⑦ 集計／グラフ — period switch, category donut, task ranking, daily trend, CSV. */
+/** ⑦ 集計／グラフ — period switch (incl. a free calendar range), category donut,
+ *  task ranking, daily trend, and a per-task CSV export for the chosen period. */
 export function Stats({ onClose }: { onClose: () => void }) {
   // Recomputed on each open so "today" is correct even after a midnight rollover.
   const today = todayStr();
-  const [period, setPeriod] = useState<"day" | "week" | "month">("week");
+  const [period, setPeriod] = useState<"day" | "week" | "month" | "custom">("week");
   const [anchor, setAnchor] = useState(today);
+  const [cStart, setCStart] = useState(startOfWeek(today));
+  const [cEnd, setCEnd] = useState(addDays(startOfWeek(today), 6));
   const [entries, setEntries] = useState<TimeEntry[]>([]);
+  const [saveMsg, setSaveMsg] = useState("");
 
   useEffect(() => {
     void teAll().then(setEntries);
@@ -22,9 +27,13 @@ export function Stats({ onClose }: { onClose: () => void }) {
   let inRange: (e: TimeEntry) => boolean;
   let label: string;
   let days: string[] | null = null;
+  let rangeStart: string;
+  let rangeEnd: string;
   if (period === "day") {
     inRange = (e) => e.date === anchor;
     label = `${cur.getMonth() + 1}月${cur.getDate()}日（${WD[cur.getDay()]}）`;
+    rangeStart = anchor;
+    rangeEnd = anchor;
   } else if (period === "week") {
     const ws = startOfWeek(anchor);
     const we = addDays(ws, 6);
@@ -33,7 +42,9 @@ export function Stats({ onClose }: { onClose: () => void }) {
       b = parseYMD(we);
     label = `${a.getMonth() + 1}/${a.getDate()} – ${b.getMonth() + 1}/${b.getDate()}`;
     days = Array.from({ length: 7 }, (_, i) => addDays(ws, i));
-  } else {
+    rangeStart = ws;
+    rangeEnd = we;
+  } else if (period === "month") {
     const y = cur.getFullYear(),
       m = cur.getMonth();
     inRange = (e) => {
@@ -43,6 +54,20 @@ export function Stats({ onClose }: { onClose: () => void }) {
     label = `${y}年 ${m + 1}月`;
     const dim = new Date(y, m + 1, 0).getDate();
     days = Array.from({ length: dim }, (_, i) => ymd(new Date(y, m, i + 1)));
+    rangeStart = ymd(new Date(y, m, 1));
+    rangeEnd = ymd(new Date(y, m, dim));
+  } else {
+    // Free calendar range — normalize so start <= end.
+    const s = cStart <= cEnd ? cStart : cEnd;
+    const e2 = cStart <= cEnd ? cEnd : cStart;
+    inRange = (e) => e.date >= s && e.date <= e2;
+    const a = parseYMD(s),
+      b = parseYMD(e2);
+    label = `${a.getMonth() + 1}/${a.getDate()} – ${b.getMonth() + 1}/${b.getDate()}`;
+    rangeStart = s;
+    rangeEnd = e2;
+    const span = Math.round((parseYMD(e2).getTime() - parseYMD(s).getTime()) / 86400000) + 1;
+    days = span > 0 && span <= 62 ? Array.from({ length: span }, (_, i) => addDays(s, i)) : null;
   }
 
   const rows = entries.filter(inRange);
@@ -51,7 +76,7 @@ export function Stats({ onClose }: { onClose: () => void }) {
   const step = (dir: number) => {
     if (period === "day") setAnchor(addDays(anchor, dir));
     else if (period === "week") setAnchor(addDays(anchor, dir * 7));
-    else setAnchor(ymd(new Date(cur.getFullYear(), cur.getMonth() + dir, 1)));
+    else if (period === "month") setAnchor(ymd(new Date(cur.getFullYear(), cur.getMonth() + dir, 1)));
   };
 
   // by category
@@ -63,7 +88,7 @@ export function Stats({ onClose }: { onClose: () => void }) {
     .map(([cat, sec]) => ({ cat, sec, color: catColor(cat) }))
     .sort((a, b) => b.sec - a.sec);
 
-  // by task
+  // by task (aggregated — one entry per task name over the period)
   const taskMap: Record<string, { name: string; sec: number; color: string; cat: string }> = {};
   rows.forEach((e) => {
     if (!taskMap[e.name]) taskMap[e.name] = { name: e.name, sec: 0, color: e.color, cat: e.cat };
@@ -78,25 +103,26 @@ export function Stats({ onClose }: { onClose: () => void }) {
     : null;
   const trendMax = trend ? Math.max(1, ...trend.map((t) => t.sec)) : 1;
 
-  const exportCsv = () => {
-    // Export exact seconds (plus convenience minutes) so spreadsheet sums match
-    // the on-screen totals; quote name/category to stay CSV-safe.
+  // CSV: one aggregated row per task for the selected period (minutes only),
+  // saved via a native dialog (then revealed in the file manager) under Tauri.
+  const exportCsv = async () => {
     const q = (v: string) => `"${String(v).replace(/"/g, '""')}"`;
-    const head = "日付,タスク,カテゴリ,時間(秒),時間(分)";
-    const lines = rows
-      .slice()
-      .sort((a, b) => a.date.localeCompare(b.date))
-      .map((e) => `${e.date},${q(e.name)},${q(e.cat)},${e.sec},${(e.sec / 60).toFixed(1)}`);
-    const csv = "﻿" + [head, ...lines].join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `task-timer-${period}-${anchor}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    const head = "タスク,カテゴリ,時間(分)";
+    const lines = taskList.map((t) => `${q(t.name)},${q(t.cat)},${Math.round(t.sec / 60)}`);
+    const totalLine = `${q("合計")},,${Math.round(total / 60)}`;
+    const csv = "﻿" + [head, ...lines, totalLine].join("\n");
+    const fname =
+      rangeStart === rangeEnd
+        ? `timetracker_${rangeStart}.csv`
+        : `timetracker_${rangeStart}_${rangeEnd}.csv`;
+    const r = await saveTextFile(fname, csv);
+    if (r.status === "saved") setSaveMsg("保存しました（保存先フォルダを開きました）");
+    else if (r.status === "downloaded") setSaveMsg("ダウンロードしました");
+    else if (r.status === "error") setSaveMsg("保存に失敗しました");
+    else setSaveMsg("");
+    if (r.status === "saved" || r.status === "downloaded") {
+      window.setTimeout(() => setSaveMsg(""), 3500);
+    }
   };
 
   // donut geometry
@@ -135,17 +161,32 @@ export function Stats({ onClose }: { onClose: () => void }) {
           <button className={period === "month" ? "sel" : ""} onClick={() => setPeriod("month")}>
             月
           </button>
+          <button className={period === "custom" ? "sel" : ""} onClick={() => setPeriod("custom")}>
+            期間
+          </button>
         </div>
         <span className="tt-cal-spacer"></span>
-        <div className="tt-cal-nav">
-          <button onClick={() => step(-1)} title="前へ">
-            <Ico n="chevron-left" />
-          </button>
-          <span className="tt-cal-period">{label}</span>
-          <button onClick={() => step(1)} title="次へ">
-            <Ico n="chevron-right" />
-          </button>
-        </div>
+        {period === "custom" ? (
+          <div className="tt-cal-range">
+            <span className="tt-datefield">
+              <input type="date" value={cStart} onChange={(e) => setCStart(e.target.value)} />
+            </span>
+            <span className="dash">–</span>
+            <span className="tt-datefield">
+              <input type="date" value={cEnd} onChange={(e) => setCEnd(e.target.value)} />
+            </span>
+          </div>
+        ) : (
+          <div className="tt-cal-nav">
+            <button onClick={() => step(-1)} title="前へ">
+              <Ico n="chevron-left" />
+            </button>
+            <span className="tt-cal-period">{label}</span>
+            <button onClick={() => step(1)} title="次へ">
+              <Ico n="chevron-right" />
+            </button>
+          </div>
+        )}
       </div>
 
       {rows.length === 0 ? (
@@ -263,9 +304,10 @@ export function Stats({ onClose }: { onClose: () => void }) {
           )}
 
           <div className="tt-csv-row">
-            <button className="tt-btn tt-btn-ghost block" onClick={exportCsv}>
+            <button className="tt-btn tt-btn-ghost block" onClick={() => void exportCsv()}>
               <Ico n="download" /> CSV でエクスポート
             </button>
+            {saveMsg && <div className="tt-csv-msg">{saveMsg}</div>}
           </div>
         </div>
       )}

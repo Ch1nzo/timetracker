@@ -530,11 +530,6 @@ export function App() {
     flashNote(`${keys.length} 件を破棄しました`);
     void hideToTray();
   };
-  const previewReminder = () => {
-    setScreen("main");
-    flashNote(`計測リマインド例：${settings.elapsedEveryMin}分が経過しました`, "bell");
-  };
-
   const manualCheckUpdate = async () => {
     setScreen("main");
     flashNote("アップデートを確認中…", "download-cloud");
@@ -765,7 +760,6 @@ export function App() {
           routines={routines}
           onChange={setSettings}
           onManageRoutines={() => setScreen("routines")}
-          onPreview={previewReminder}
           onCheckUpdate={manualCheckUpdate}
           appVersion={APP_VERSION}
           onReset={() => {

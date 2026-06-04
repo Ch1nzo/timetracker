@@ -57,6 +57,8 @@ Claude Design ハンドオフ（Task Timer ①メイン・方向B）を忠実に
 - **plugin 登録順**: `tauri_plugin_single_instance` を最初に登録（`#[cfg(desktop)]` 内）。順序を変えると多重起動ガードが壊れる
 - 新しい `#[tauri::command]` は `generate_handler![]` への追加も必須（片方だけだと invoke が実行時に失敗）
 - フロントから新しい plugin / window API を呼ぶ場合は `src-tauri/capabilities/default.json` に permission 追加が必須
+- 登録済み plugin: sql / notification / dialog / opener（全プラットフォーム）+ desktop 専用群。CSV 保存は `dialog`（保存先選択）→ 独自コマンド `write_file`（std::fs で任意パスへ書き込み。fs plugin の scope 制約回避）→ `opener` の `revealItemInDir` で OS ファイラを開く、の流れ（`src/lib/tauri.ts` の `saveTextFile`）
+- **`tauri.conf.json` の window `dragDropEnabled: false` を維持**（true だと webview の HTML5 ドラッグ&ドロップを Tauri が横取りし、カレンダーの記録移動・カテゴリ並べ替えが動かなくなる）
 - desktop 専用 plugin（global-shortcut / updater / process / autostart / single-instance）は `#[cfg(desktop)]` と Cargo.toml の target 指定 deps のゲートを維持する
 - **CloseRequested**: 既定（`trayKeepRunning` = true）は `prevent_close()` + `hide()`（トレイ格納）。`set_close_to_tray(false)` が来ている場合は `prevent_close()` + `emit("app-quit-requested")` し、フロント（`doQuit`）が実行中セッションを flush → `quit_app` で終了する。`CloseToTray(Mutex<bool>)` を `manage()` し、フロントが設定変更時に `set_close_to_tray` で同期する（generate_handler 登録済み）
 - 本当の終了はトレイメニューの quit（`app.exit(0)`）または上記 `quit_app` のみ
@@ -82,6 +84,8 @@ Claude Design ハンドオフ（Task Timer ①メイン・方向B）を忠実に
 4. `src/App.tsx` の `const APP_VERSION`（**見落としやすい**）
 
 ## リリース（GitHub Actions）
+
+> 人間がたどれる手順書は **`docs/RELEASING.md`**。以下は要点。
 
 - `git tag vX.Y.Z && git push origin vX.Y.Z` → `.github/workflows/release.yml` が起動。3段構成: **create-release（draft + 変更点自動生成）→ build マトリクス（macOS arm64/x64 dmg、Linux **AppImage のみ**、Windows NSIS）→ publish（全ビルド成功後に draft 解除＝自動公開）**
 - assets は「インストーラ + updater 必須ファイル（`latest.json` / `.sig` / mac `.app.tar.gz`）+ source」に絞る方針。Linux は **AppImage のみ**（deb/rpm は出さない）。bundle 形式を増やす場合は `release.yml` の matrix `args` の `--bundles` を編集
