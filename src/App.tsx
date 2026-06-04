@@ -10,6 +10,7 @@ import {
   loadMain,
   saveMain,
   teAdd,
+  teAll,
 } from "./lib/db";
 import {
   IS_TAURI,
@@ -26,8 +27,9 @@ import {
 } from "./lib/tauri";
 import type { Note, Routine, Settings, Task, TimeEntry } from "./lib/types";
 import { computeTimer, daySegments, type DaySeg } from "./lib/timer";
+import { reconcileTodayTasks } from "./lib/tasks";
 
-const APP_VERSION = "0.5.2";
+const APP_VERSION = "0.5.3";
 
 import { TitleBar } from "./components/TitleBar";
 import { StatusBar } from "./components/StatusBar";
@@ -195,6 +197,24 @@ export function App() {
     return () => clearTimeout(id);
   }, [ready, tasks, routines, settings, runningKey, sessionSec, navIndex]);
 
+  // --- sync the main task list with today's measured history ------------
+  // Whenever the main screen is shown (incl. first load and returning from the
+  // calendar), pull today's time_entries and reconcile so the main list and the
+  // calendar show the same tasks for today. The running task is left to its live
+  // counter. No-op state update when nothing changed (reconcile returns the same
+  // array ref), so this won't loop.
+  useEffect(() => {
+    if (!ready || screen !== "main") return;
+    let alive = true;
+    void teAll().then((all) => {
+      if (!alive) return;
+      setTasks((prev) => reconcileTodayTasks(prev, all, ymd(new Date()), runningKeyRef.current));
+    });
+    return () => {
+      alive = false;
+    };
+  }, [ready, screen]);
+
   // --- keep OS integrations in sync with settings -----------------------
   useEffect(() => {
     if (ready) void syncGlobalShortcut(settings.globalShortcutKeys, settings.globalShortcut);
@@ -359,7 +379,15 @@ export function App() {
       stop();
       return;
     }
-    if (active) startTask(active.k);
+    if (active) {
+      startTask(active.k);
+      return;
+    }
+    // No task selected — warn instead of starting nothing. (flashNote is defined
+    // later in the component, so emit the toast directly here.)
+    setNote({ text: "計測するタスクを選択してください", icon: "info" });
+    if (noteTimer.current) clearTimeout(noteTimer.current);
+    noteTimer.current = window.setTimeout(() => setNote(null), 2600);
   }, [runningKey, active, startTask, stop]);
   useEffect(() => {
     toggleActiveRef.current = toggleActive;
@@ -508,6 +536,7 @@ export function App() {
       return;
     }
     if (pending.length > 0) {
+      setScreen("main"); // the carryover dialog renders on main — make sure it's visible
       setShowCarry(true);
     } else {
       flashNote("今日のタスクはすべて完了！");
@@ -692,7 +721,7 @@ export function App() {
     if (t) {
       return (
         <div className={rootCls} data-accent={accent}>
-          <TitleBar subtitle="タスクを編集" />
+          <TitleBar subtitle="タスクを編集" onCloseApp={closeApp} />
           <TaskEditor
             task={t}
             onSave={saveTask}
@@ -711,7 +740,7 @@ export function App() {
   if (screen === "morning") {
     return (
       <div className={rootCls} data-accent={accent}>
-        <TitleBar subtitle="朝の準備" />
+        <TitleBar subtitle="朝の準備" onCloseApp={closeApp} />
         <MorningFlow
           routines={routines}
           existingNames={existingNames}
@@ -725,7 +754,7 @@ export function App() {
   if (screen === "routines") {
     return (
       <div className={rootCls} data-accent={accent}>
-        <TitleBar subtitle="ルーティン管理" />
+        <TitleBar subtitle="ルーティン管理" onCloseApp={closeApp} />
         <RoutineManager
           routines={routines}
           onAdd={addRoutine}
@@ -738,7 +767,7 @@ export function App() {
   if (screen === "calendar") {
     return (
       <div className={rootCls} data-accent={accent}>
-        <TitleBar subtitle="カレンダー" />
+        <TitleBar subtitle="カレンダー" onCloseApp={closeApp} />
         <Calendar onClose={() => setScreen("main")} />
       </div>
     );
@@ -746,7 +775,7 @@ export function App() {
   if (screen === "stats") {
     return (
       <div className={rootCls} data-accent={accent}>
-        <TitleBar subtitle="集計" />
+        <TitleBar subtitle="集計" onCloseApp={closeApp} />
         <Stats onClose={() => setScreen("main")} />
       </div>
     );
@@ -754,7 +783,7 @@ export function App() {
   if (screen === "settings") {
     return (
       <div className={rootCls} data-accent={accent}>
-        <TitleBar subtitle="設定" />
+        <TitleBar subtitle="設定" onCloseApp={closeApp} />
         <SettingsScreen
           settings={settings}
           routines={routines}
@@ -778,7 +807,7 @@ export function App() {
   if (tasks.length === 0) {
     return (
       <div className={rootCls} data-accent={accent}>
-        <TitleBar />
+        <TitleBar onCloseApp={closeApp} />
         <StatusBar live={false} />
         <div className="tt-empty">
           <span className="ico">
@@ -853,7 +882,7 @@ export function App() {
               </kbd>
             </button>
           ) : (
-            <button className="tt-btn tt-btn-run block" onClick={toggleActive} disabled={!active}>
+            <button className="tt-btn tt-btn-run block" onClick={toggleActive}>
               <Ico n="play" /> 開始 <kbd style={{ opacity: 0.7 }}>Space</kbd>
             </button>
           )}
