@@ -54,6 +54,25 @@ export async function onToggleTimer(cb: () => void): Promise<UnlistenFn> {
   return listen("toggle-timer", () => cb());
 }
 
+/** Subscribe to the "app-quit-requested" event the backend emits when the user
+ *  closes the window while "閉じても計測を続ける" is OFF. The frontend flushes
+ *  the running session, persists, and then quits. */
+export async function onQuitRequested(cb: () => void): Promise<UnlistenFn> {
+  if (!IS_TAURI) return () => {};
+  return listen("app-quit-requested", () => cb());
+}
+
+/** Tell the backend whether closing the window should keep running in the tray
+ *  (true) or fully quit the app (false). */
+export async function syncCloseToTray(keep: boolean): Promise<void> {
+  if (!IS_TAURI) return;
+  try {
+    await invoke("set_close_to_tray", { keep });
+  } catch {
+    /* ignore */
+  }
+}
+
 // --- global shortcut ---------------------------------------------------
 export async function syncGlobalShortcut(
   accelerator: string,
@@ -102,6 +121,7 @@ export async function checkForUpdate(): Promise<Update | null> {
 }
 
 export async function installUpdateAndRelaunch(update: Update): Promise<void> {
+  if (!IS_TAURI) return;
   await update.downloadAndInstall();
   await relaunch();
 }

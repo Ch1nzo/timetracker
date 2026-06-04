@@ -2,15 +2,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Update } from "@tauri-apps/plugin-updater";
 
 import { Ico } from "./lib/icons";
-import { hhmm, hm, hms, nowHM } from "./lib/format";
+import { hhmm, hm, hms, nowHM, ymd } from "./lib/format";
 import { catColor } from "./lib/categories";
-import { DEFAULT_SETTINGS, ROUTINES_SEED, TASK_SEED } from "./lib/data";
+import { DEFAULT_SETTINGS, ROUTINES_SEED } from "./lib/data";
 import {
   initData,
   loadMain,
   saveMain,
   teAdd,
-  todayStr,
 } from "./lib/db";
 import {
   IS_TAURI,
@@ -18,11 +17,33 @@ import {
   hideToTray,
   installUpdateAndRelaunch,
   notify,
+  onQuitRequested,
   onToggleTimer,
+  quitApp,
   syncAutostart,
+  syncCloseToTray,
   syncGlobalShortcut,
 } from "./lib/tauri";
-import type { Note, Routine, Settings, Task } from "./lib/types";
+import type { Note, Routine, Settings, Task, TimeEntry } from "./lib/types";
+
+const APP_VERSION = "0.5.0";
+
+/** Split a wall-clock [startMs, endMs) span into per-calendar-day segments so a
+ *  session that crosses midnight is attributed to the correct date(s). */
+function daySegments(startMs: number, endMs: number): { date: string; sec: number }[] {
+  const segs: { date: string; sec: number }[] = [];
+  let cur = startMs;
+  let guard = 0;
+  while (cur < endMs && guard++ < 800) {
+    const d = new Date(cur);
+    const nextMid = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime();
+    const segEnd = Math.min(endMs, nextMid);
+    const sec = Math.floor((segEnd - cur) / 1000);
+    if (sec > 0) segs.push({ date: ymd(d), sec });
+    cur = nextMid;
+  }
+  return segs;
+}
 
 import { TitleBar } from "./components/TitleBar";
 import { StatusBar } from "./components/StatusBar";
@@ -36,8 +57,6 @@ import { Settings as SettingsScreen } from "./screens/Settings";
 import { Calendar } from "./screens/Calendar";
 import { Stats } from "./screens/Stats";
 import { CarryoverDialog } from "./screens/CarryoverDialog";
-
-const APP_VERSION = "0.4.0";
 
 /* normalize a keydown event's main key (robust against Alt remaps) */
 function evKeyName(e: KeyboardEvent): string {
@@ -60,7 +79,7 @@ function matchShortcut(e: KeyboardEvent, combo: string): boolean {
 
 export function App() {
   const [ready, setReady] = useState(false);
-  const [tasks, setTasks] = useState<Task[]>(TASK_SEED);
+  const [tasks, setTasks] = useState<Task[]>([]);
   const [routines, setRoutines] = useState<Routine[]>(ROUTINES_SEED);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [runningKey, setRunning] = useState<string | null>(null);
@@ -84,17 +103,26 @@ export function App() {
 
   const filterRef = useRef<HTMLInputElement>(null);
   const addRef = useRef<HTMLInputElement>(null);
-  const lastToastAt = useRef(0);
   const noteTimer = useRef<number | undefined>(undefined);
   const tasksRef = useRef(tasks);
-  const sessionRef = useRef(sessionSec);
+  const settingsRef = useRef(settings);
+  const runningKeyRef = useRef<string | null>(runningKey);
+  // Wall-clock measurement anchors (see daySegments / syncTimer).
+  const startedAtRef = useRef<number | null>(null); // epoch ms of current session
+  const lastElapsedRef = useRef(0); // last processed elapsed seconds since startedAt
+  const reminderBucketRef = useRef(0); // last fired "every N min" bucket
+  const todayDateRef = useRef<string>(ymd(new Date())); // day the todaySec counters belong to
   const toggleActiveRef = useRef<() => void>(() => {});
+  const doQuitRef = useRef<() => void>(() => {});
   useEffect(() => {
     tasksRef.current = tasks;
   }, [tasks]);
   useEffect(() => {
-    sessionRef.current = sessionSec;
-  }, [sessionSec]);
+    settingsRef.current = settings;
+  }, [settings]);
+  useEffect(() => {
+    runningKeyRef.current = runningKey;
+  }, [runningKey]);
 
   const q = query.trim();
   const actives = tasks.filter((t) => !t.done && (!q || t.name.includes(q)));
@@ -117,22 +145,37 @@ export function App() {
         const init = await loadMain();
         if (!alive) return;
         if (init) {
-          if (init.runningKey && init.savedAt) {
-            const gap = Math.floor((Date.now() - init.savedAt) / 1000);
-            if (gap > 0 && gap < 86400) {
-              init.sessionSec = (init.sessionSec || 0) + gap;
+          const now = Date.now();
+          todayDateRef.current = init.todayDate || ymd(new Date(now));
+          if (init.runningKey && init.startedAt) {
+            const offline = Math.floor((now - (init.savedAt || now)) / 1000);
+            if (offline >= 0 && offline < 86400) {
+              // Resume the still-running session anchored at its real start.
+              // syncTimer (run once after `ready`) reconciles the offline span
+              // and any midnight rollover.
+              startedAtRef.current = init.startedAt;
+              runningKeyRef.current = init.runningKey;
+              lastElapsedRef.current = Math.max(
+                0,
+                Math.floor(((init.savedAt || now) - init.startedAt) / 1000),
+              );
+              const everyMin = Math.max(1, init.settings?.elapsedEveryMin || 25);
+              reminderBucketRef.current = Math.floor((init.sessionSec || 0) / (everyMin * 60));
+              setRunning(init.runningKey);
+              setSession(init.sessionSec || 0);
+            } else {
+              // Stale (offline >= 24h or a clock jump): finalize the measured
+              // part up to the last save and stop, rather than silently carrying
+              // a wrong running time.
               const t = init.tasks.find((x) => x.k === init.runningKey);
-              if (t) {
-                t.todaySec += gap;
-                t.totalSec += gap;
-              }
+              if (t && init.savedAt) logRange(t, init.startedAt, init.savedAt);
+              startedAtRef.current = null;
+              runningKeyRef.current = null;
             }
           }
           setTasks(init.tasks);
           if (init.routines) setRoutines(init.routines);
           if (init.settings) setSettings({ ...DEFAULT_SETTINGS, ...init.settings });
-          setRunning(init.runningKey ?? null);
-          setSession(init.sessionSec || 0);
           setNav(init.navIndex || 0);
         }
       } catch (e) {
@@ -146,6 +189,7 @@ export function App() {
     return () => {
       alive = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // --- persist (debounced) ----------------------------------------------
@@ -160,6 +204,8 @@ export function App() {
         sessionSec,
         navIndex,
         savedAt: Date.now(),
+        startedAt: startedAtRef.current,
+        todayDate: todayDateRef.current,
       });
     }, 400);
     return () => clearTimeout(id);
@@ -172,6 +218,9 @@ export function App() {
   useEffect(() => {
     if (ready) void syncAutostart(settings.autostart);
   }, [ready, settings.autostart]);
+  useEffect(() => {
+    if (ready) void syncCloseToTray(settings.trayKeepRunning);
+  }, [ready, settings.trayKeepRunning]);
 
   // --- tray / global-shortcut toggle event ------------------------------
   useEffect(() => {
@@ -184,74 +233,149 @@ export function App() {
     };
   }, []);
 
-  // --- timer tick -------------------------------------------------------
+  // --- backend-requested quit (close while keep-running is OFF) ----------
   useEffect(() => {
-    if (!runningKey) return;
-    const id = setInterval(() => {
-      setSession((s) => {
-        const ns = s + 1;
-        const everySec = Math.max(60, (settings.elapsedEveryMin || 25) * 60);
-        if (
-          settings.elapsedReminder &&
-          ns > 0 &&
-          ns % everySec === 0 &&
-          Date.now() - lastToastAt.current > 2000
-        ) {
-          lastToastAt.current = Date.now();
-          setToast(true);
-          const t = tasksRef.current.find((x) => x.k === runningKey);
-          void notify(t?.name ?? "計測中", `${Math.floor(ns / 60)}分が経過しました`);
-        }
-        return ns;
-      });
-      setTasks((ts) =>
-        ts.map((t) =>
-          t.k === runningKey ? { ...t, todaySec: t.todaySec + 1, totalSec: t.totalSec + 1 } : t,
-        ),
-      );
-    }, 1000);
-    return () => clearInterval(id);
-  }, [runningKey, settings.elapsedReminder, settings.elapsedEveryMin]);
+    let un: (() => void) | undefined;
+    void onQuitRequested(() => doQuitRef.current()).then((fn) => {
+      un = fn;
+    });
+    return () => {
+      if (un) un();
+    };
+  }, []);
 
   // --- session logging (real time_entries) ------------------------------
-  const logSession = useCallback((key: string | null, sec: number) => {
-    if (!key || sec <= 0) return;
-    const t = tasksRef.current.find((x) => x.k === key);
-    if (!t) return;
-    void teAdd({
-      id: "te" + Date.now() + Math.random().toString(36).slice(2, 6),
-      date: todayStr(),
-      name: t.name,
-      cat: t.cat,
-      color: t.color,
-      sec,
-      source: "timer",
-      created_at: Date.now(),
+  // Log a measured span [startMs, endMs) for a task, split across calendar days
+  // so a session crossing midnight lands on the right date(s). Returns a promise
+  // that resolves once the rows are written (awaited on quit; ignored elsewhere).
+  const logRange = useCallback((task: Task, startMs: number, endMs: number): Promise<void> => {
+    const writes = daySegments(startMs, endMs).map((seg, i) => {
+      const entry: TimeEntry = {
+        id: "te" + Date.now().toString(36) + i + Math.random().toString(36).slice(2, 6),
+        date: seg.date,
+        name: task.name,
+        cat: task.cat,
+        color: task.color,
+        sec: seg.sec,
+        source: "timer",
+        created_at: Date.now() + i,
+      };
+      return teAdd(entry);
     });
+    return Promise.allSettled(writes).then(() => {});
   }, []);
+  // Flush the currently-running session (from its anchor up to `endMs`/now).
+  const logRunning = useCallback(
+    (key: string, endMs?: number): Promise<void> => {
+      const start = startedAtRef.current;
+      if (start == null) return Promise.resolve();
+      const t = tasksRef.current.find((x) => x.k === key);
+      if (!t) return Promise.resolve();
+      return logRange(t, start, endMs ?? Date.now());
+    },
+    [logRange],
+  );
+
+  // --- wall-clock timer sync --------------------------------------------
+  // Derives elapsed time from Date.now() instead of counting ticks, so it stays
+  // correct even when a hidden/tray webview throttles its timers. Also handles
+  // the midnight rollover for the per-task "today" counters.
+  const syncTimer = useCallback(() => {
+    const now = Date.now();
+    const today = ymd(new Date(now));
+    const runKey = runningKeyRef.current;
+    const start = startedAtRef.current;
+
+    if (!runKey || start == null) {
+      // Idle: just roll "today" over at midnight.
+      if (today !== todayDateRef.current) {
+        todayDateRef.current = today;
+        setTasks((ts) => ts.map((t) => (t.todaySec ? { ...t, todaySec: 0 } : t)));
+      }
+      return;
+    }
+
+    const elapsed = Math.floor((now - start) / 1000);
+    const rolled = today !== todayDateRef.current;
+    if (elapsed <= lastElapsedRef.current && !rolled) return; // nothing new
+
+    let totalDelta = elapsed - lastElapsedRef.current;
+    if (totalDelta < 0) totalDelta = 0;
+
+    if (rolled) {
+      // Flush the pre-midnight portion to its real date(s), then re-anchor the
+      // session to today's midnight so "today" only counts today's seconds.
+      const midnight = new Date(now);
+      midnight.setHours(0, 0, 0, 0);
+      logRunning(runKey, midnight.getTime());
+      startedAtRef.current = midnight.getTime();
+      reminderBucketRef.current = 0;
+      todayDateRef.current = today;
+    }
+
+    const todayElapsed = Math.floor((now - startedAtRef.current!) / 1000);
+    lastElapsedRef.current = rolled ? todayElapsed : elapsed;
+    setSession(rolled ? todayElapsed : elapsed);
+    setTasks((ts) =>
+      ts.map((t) => {
+        if (t.k !== runKey) return rolled ? { ...t, todaySec: 0 } : t;
+        return {
+          ...t,
+          totalSec: t.totalSec + totalDelta,
+          todaySec: rolled ? todayElapsed : t.todaySec + totalDelta,
+        };
+      }),
+    );
+
+    // Elapsed reminder — fire once per crossed N-minute boundary (wall-clock).
+    const s = settingsRef.current;
+    if (s.elapsedReminder) {
+      const everyMin = Math.max(1, s.elapsedEveryMin || 25);
+      const ref = rolled ? todayElapsed : elapsed;
+      const bucket = Math.floor(ref / (everyMin * 60));
+      if (bucket > reminderBucketRef.current) {
+        reminderBucketRef.current = bucket;
+        setToast(true);
+        const t = tasksRef.current.find((x) => x.k === runKey);
+        void notify(t?.name ?? "計測中", `${bucket * everyMin}分が経過しました`);
+      }
+    }
+  }, [logRunning]);
 
   const startTask = useCallback(
     (k: string) => {
-      setRunning((prev) => {
-        if (prev === k) return prev;
-        if (prev) logSession(prev, sessionRef.current);
-        setSession(0);
-        setTasks((ts) =>
-          ts.map((t) =>
-            t.k === k ? { ...t, sessions: t.sessions + 1, last: nowHM(), done: false } : t,
-          ),
-        );
-        return k;
-      });
+      if (runningKeyRef.current === k) return;
+      if (runningKeyRef.current) logRunning(runningKeyRef.current); // flush previous
+      const now = Date.now();
+      const today = ymd(new Date(now));
+      const rolled = today !== todayDateRef.current; // starting after a midnight gap
+      startedAtRef.current = now;
+      runningKeyRef.current = k;
+      lastElapsedRef.current = 0;
+      reminderBucketRef.current = 0;
+      todayDateRef.current = today;
+      setSession(0);
+      setRunning(k);
+      setTasks((ts) =>
+        ts.map((t) => {
+          const base = rolled ? { ...t, todaySec: 0 } : t;
+          return t.k === k
+            ? { ...base, sessions: t.sessions + 1, last: nowHM(), done: false }
+            : base;
+        }),
+      );
     },
-    [logSession],
+    [logRunning],
   );
   const stop = useCallback(() => {
-    setRunning((prev) => {
-      if (prev) logSession(prev, sessionRef.current);
-      return null;
-    });
-  }, [logSession]);
+    if (runningKeyRef.current) logRunning(runningKeyRef.current);
+    startedAtRef.current = null;
+    runningKeyRef.current = null;
+    lastElapsedRef.current = 0;
+    reminderBucketRef.current = 0;
+    setSession(0);
+    setRunning(null);
+  }, [logRunning]);
   const toggleActive = useCallback(() => {
     if (runningKey) {
       stop();
@@ -262,6 +386,41 @@ export function App() {
   useEffect(() => {
     toggleActiveRef.current = toggleActive;
   }, [toggleActive]);
+
+  // Reconcile once the persisted state has loaded (applies any offline span and
+  // midnight rollover for a resumed session).
+  useEffect(() => {
+    if (ready) syncTimer();
+  }, [ready, syncTimer]);
+
+  // Per-second display update while a task is running.
+  useEffect(() => {
+    if (!runningKey) return;
+    const id = window.setInterval(syncTimer, 1000);
+    return () => clearInterval(id);
+  }, [runningKey, syncTimer]);
+
+  // Low-frequency guard so the "today" counters still roll over at midnight even
+  // when idle (and as a backstop while a hidden tray webview throttles the 1s
+  // interval above).
+  useEffect(() => {
+    const id = window.setInterval(syncTimer, 30000);
+    return () => clearInterval(id);
+  }, [syncTimer]);
+
+  // Re-sync immediately when the window returns to the foreground (e.g. shown
+  // from the tray), recovering any time the throttled timer missed.
+  useEffect(() => {
+    const onShow = () => {
+      if (!document.hidden) syncTimer();
+    };
+    document.addEventListener("visibilitychange", onShow);
+    window.addEventListener("focus", onShow);
+    return () => {
+      document.removeEventListener("visibilitychange", onShow);
+      window.removeEventListener("focus", onShow);
+    };
+  }, [syncTimer]);
 
   const complete = (k: string) => {
     if (k === runningKey) stop();
@@ -288,10 +447,12 @@ export function App() {
   const addManyTasks = (list: { name: string; cat: string }[]) => {
     setTasks((ts) => {
       const have = new Set(ts.map((t) => t.name));
-      const add = list
-        .filter((x) => !have.has(x.name))
-        .map((x, i) => ({
-          k: "t" + Date.now() + i,
+      const add: Task[] = [];
+      for (const x of list) {
+        if (have.has(x.name)) continue; // de-dupe vs existing AND within the batch
+        have.add(x.name);
+        add.push({
+          k: "t" + Date.now() + add.length,
           name: x.name,
           cat: x.cat,
           color: catColor(x.cat),
@@ -300,7 +461,8 @@ export function App() {
           sessions: 0,
           last: "—",
           done: false,
-        }));
+        });
+      }
       return [...ts, ...add];
     });
     setScreen("main");
@@ -322,7 +484,51 @@ export function App() {
     noteTimer.current = window.setTimeout(() => setNote(null), 2600);
   }, []);
 
+  // Flush the running session, persist, and quit (used when "閉じても計測を続
+  // ける" is OFF, from the close button or the backend's app-quit-requested).
+  // The session flush is AWAITED so its time_entries row commits before the
+  // backend's app.exit(0) tears the process down.
+  const doQuit = async () => {
+    const k = runningKeyRef.current;
+    if (k) {
+      try {
+        await logRunning(k); // await — must commit before app.exit(0)
+      } catch {
+        /* ignore */
+      }
+      startedAtRef.current = null;
+      runningKeyRef.current = null;
+      lastElapsedRef.current = 0;
+      reminderBucketRef.current = 0;
+      setSession(0);
+      setRunning(null);
+    }
+    try {
+      await saveMain({
+        tasks: tasksRef.current,
+        routines,
+        settings,
+        runningKey: null,
+        sessionSec: 0,
+        navIndex,
+        savedAt: Date.now(),
+        startedAt: null,
+        todayDate: todayDateRef.current,
+      });
+    } catch {
+      /* ignore */
+    }
+    await quitApp();
+  };
+  useEffect(() => {
+    doQuitRef.current = () => void doQuit();
+  });
+
   const closeApp = () => {
+    if (!settings.trayKeepRunning) {
+      void doQuit();
+      return;
+    }
     if (pending.length > 0) {
       setShowCarry(true);
     } else {
@@ -332,6 +538,7 @@ export function App() {
   };
   const carryMove = (keys: string[]) => {
     const set = new Set(keys);
+    if (runningKey && set.has(runningKey)) stop(); // flush before dropping the task
     setTasks((ts) => ts.filter((t) => !set.has(t.k)));
     setShowCarry(false);
     flashNote(`${keys.length} 件を明日へ繰り越しました`);
@@ -339,6 +546,7 @@ export function App() {
   };
   const carryDiscard = (keys: string[]) => {
     const set = new Set(keys);
+    if (runningKey && set.has(runningKey)) stop();
     setTasks((ts) => ts.filter((t) => !set.has(t.k)));
     setShowCarry(false);
     flashNote(`${keys.length} 件を破棄しました`);
@@ -583,9 +791,8 @@ export function App() {
           onCheckUpdate={manualCheckUpdate}
           appVersion={APP_VERSION}
           onReset={() => {
-            setTasks(TASK_SEED.map((t) => ({ ...t })));
-            setRunning(null);
-            setSession(0);
+            if (runningKey) stop();
+            setTasks([]);
             setNav(0);
             setScreen("main");
           }}

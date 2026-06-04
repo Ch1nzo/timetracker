@@ -6,13 +6,13 @@ import { addDays, hm, parseYMD, startOfWeek, WD, ymd } from "../lib/format";
 import { teAll, teDelete, teMove, teUpdate, todayStr } from "../lib/db";
 import type { TimeEntry } from "../lib/types";
 
-const TODAY_STR = todayStr();
-
 /** ⑥ カレンダー — month / week views, drag-to-move, tap-to-edit. */
 export function Calendar({ onClose }: { onClose: () => void }) {
+  // Recomputed on each open so the "today" highlight is correct after midnight.
+  const today = todayStr();
   const [entries, setEntries] = useState<TimeEntry[]>([]);
   const [view, setView] = useState<"month" | "week">("month");
-  const [anchor, setAnchor] = useState(TODAY_STR);
+  const [anchor, setAnchor] = useState(today);
   const [dragOver, setDragOver] = useState<string | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
   const dragId = useRef<string | null>(null);
@@ -116,7 +116,7 @@ export function Calendar({ onClose }: { onClose: () => void }) {
             <Ico n="chevron-right" />
           </button>
         </div>
-        <button className="tt-cal-today" onClick={() => setAnchor(TODAY_STR)}>
+        <button className="tt-cal-today" onClick={() => setAnchor(today)}>
           今日
         </button>
       </div>
@@ -125,6 +125,7 @@ export function Calendar({ onClose }: { onClose: () => void }) {
         <MonthView
           cur={cur}
           anchor={anchor}
+          today={today}
           setAnchor={setAnchor}
           byDate={byDate}
           dayTotal={dayTotal}
@@ -137,6 +138,7 @@ export function Calendar({ onClose }: { onClose: () => void }) {
       ) : (
         <WeekView
           anchor={anchor}
+          today={today}
           byDate={byDate}
           dayTotal={dayTotal}
           dragOver={dragOver}
@@ -193,6 +195,7 @@ function EntryRow({
 }
 
 interface ViewShared {
+  today: string;
   byDate: (s: string) => TimeEntry[];
   dayTotal: (s: string) => number;
   dragOver: string | null;
@@ -205,6 +208,7 @@ interface ViewShared {
 function MonthView({
   cur,
   anchor,
+  today,
   setAnchor,
   byDate,
   dayTotal,
@@ -242,7 +246,7 @@ function MonthView({
           const cls =
             "tt-cal-cell" +
             (d.getMonth() !== m ? " other" : "") +
-            (s === TODAY_STR ? " today" : "") +
+            (s === today ? " today" : "") +
             (s === anchor ? " sel" : "") +
             (dragOver === s ? " dragover" : "");
           return (
@@ -297,6 +301,7 @@ function MonthView({
 
 function WeekView({
   anchor,
+  today,
   byDate,
   dayTotal,
   dragOver,
@@ -314,7 +319,7 @@ function WeekView({
           const d = parseYMD(s);
           const list = byDate(s);
           const cls =
-            "tt-week-day" + (s === TODAY_STR ? " today" : "") + (dragOver === s ? " dragover" : "");
+            "tt-week-day" + (s === today ? " today" : "") + (dragOver === s ? " dragover" : "");
           return (
             <div
               key={s}
