@@ -1,7 +1,7 @@
 {
   "name": "timetracker",
   "private": true,
-  "version": "0.5.3",
+  "version": "0.5.4",
   "type": "module",
   "description": "Task Timer — a focus-hero desktop time tracker (Tauri v2 + React + SQLite)",
   "scripts": {

@@ -89,6 +89,54 @@ export async function teDelete(id: string): Promise<void> {
   await db.execute("DELETE FROM time_entries WHERE id = $1", [id]);
 }
 
+/** One row per (name, date): add `sec` to that day's row for the task, or create
+ *  it. Used both when a task is added to the main list (sec=0) and when a
+ *  measured segment is flushed (sec=delta), so a day shows exactly its task list
+ *  with no per-session duplicate rows — keeping the main screen and the calendar
+ *  in sync for that day. */
+export async function teAccumulate(
+  date: string,
+  name: string,
+  cat: string,
+  color: string,
+  sec: number,
+): Promise<void> {
+  const db = await getDb();
+  const rows = await db.select<{ id: string; sec: number }[]>(
+    "SELECT id, sec FROM time_entries WHERE date = $1 AND name = $2 ORDER BY created_at ASC LIMIT 1",
+    [date, name],
+  );
+  if (rows.length) {
+    await db.execute("UPDATE time_entries SET sec = $1, cat = $2, color = $3 WHERE id = $4", [
+      rows[0].sec + sec,
+      cat,
+      color,
+      rows[0].id,
+    ]);
+  } else {
+    await db.execute(
+      "INSERT INTO time_entries (id, date, name, cat, color, sec, source, created_at) " +
+        "VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+      [
+        "te" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        date,
+        name,
+        cat,
+        color,
+        sec,
+        "timer",
+        Date.now(),
+      ],
+    );
+  }
+}
+
+/** Remove a task's record for a given day (symmetric to adding it). */
+export async function teDeleteTaskDay(date: string, name: string): Promise<void> {
+  const db = await getDb();
+  await db.execute("DELETE FROM time_entries WHERE date = $1 AND name = $2", [date, name]);
+}
+
 /** Wire up category persistence. Call once on startup. No demo data is seeded —
  *  tasks and measured history start empty and accumulate from real usage. */
 export async function initData(): Promise<void> {

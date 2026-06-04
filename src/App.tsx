@@ -9,8 +9,9 @@ import {
   initData,
   loadMain,
   saveMain,
-  teAdd,
+  teAccumulate,
   teAll,
+  teDeleteTaskDay,
 } from "./lib/db";
 import {
   IS_TAURI,
@@ -25,11 +26,11 @@ import {
   syncCloseToTray,
   syncGlobalShortcut,
 } from "./lib/tauri";
-import type { Note, Routine, Settings, Task, TimeEntry } from "./lib/types";
+import type { Note, Routine, Settings, Task } from "./lib/types";
 import { computeTimer, daySegments, type DaySeg } from "./lib/timer";
 import { reconcileTodayTasks } from "./lib/tasks";
 
-const APP_VERSION = "0.5.3";
+const APP_VERSION = "0.5.4";
 
 import { TitleBar } from "./components/TitleBar";
 import { StatusBar } from "./components/StatusBar";
@@ -252,20 +253,12 @@ export function App() {
   // Write pre-computed per-day segments for a task. Returns a promise that
   // resolves once the rows are written (awaited on quit; ignored elsewhere).
   const writeSegments = useCallback((task: Task, segs: DaySeg[]): Promise<void> => {
-    const writes = segs.map((seg, i) => {
-      const entry: TimeEntry = {
-        id: "te" + Date.now().toString(36) + i + Math.random().toString(36).slice(2, 6),
-        date: seg.date,
-        name: task.name,
-        cat: task.cat,
-        color: task.color,
-        sec: seg.sec,
-        source: "timer",
-        created_at: Date.now() + i,
-      };
-      return teAdd(entry);
-    });
-    return Promise.allSettled(writes).then(() => {});
+    // Accumulate each day-segment into that task's single row for the day, so
+    // the calendar shows one record per task per day (no per-session dupes) and
+    // stays in sync with the main task list.
+    return Promise.allSettled(
+      segs.map((seg) => teAccumulate(seg.date, task.name, task.cat, task.color, seg.sec)),
+    ).then(() => {});
   }, []);
   // Log a measured span [startMs, endMs) for a task, split across calendar days
   // so a session crossing midnight lands on the right date(s).
@@ -434,7 +427,12 @@ export function App() {
   };
   const del = (k: string) => {
     if (k === runningKey) stop();
-    setTasks((ts) => ts.filter((t) => t.k !== k));
+    const t = tasksRef.current.find((x) => x.k === k);
+    setTasks((ts) => ts.filter((x) => x.k !== k));
+    // Remove today's calendar record too, so deleting a task on the main screen
+    // also clears it from today's calendar (and it won't be re-added by the
+    // reconcile). Past days' history for the name is left intact.
+    if (t) void teDeleteTaskDay(ymd(new Date()), t.name);
   };
 
   const addTask = (name: string, cat: string) => {
@@ -446,28 +444,34 @@ export function App() {
       ...ts,
       { k, name: nm, cat: c, color: catColor(c), todaySec: 0, totalSec: 0, sessions: 0, last: "—", done: false },
     ]);
+    // Mirror into today's calendar so the two views stay in sync (0:00 until measured).
+    void teAccumulate(ymd(new Date()), nm, c, catColor(c), 0);
     setNewName("");
     setNewCat("未分類");
     setAdding(false);
   };
   const addManyTasks = (list: { name: string; cat: string }[]) => {
+    const today = ymd(new Date());
     setTasks((ts) => {
       const have = new Set(ts.map((t) => t.name));
       const add: Task[] = [];
       for (const x of list) {
         if (have.has(x.name)) continue; // de-dupe vs existing AND within the batch
         have.add(x.name);
+        const color = catColor(x.cat);
         add.push({
           k: "t" + Date.now() + add.length,
           name: x.name,
           cat: x.cat,
-          color: catColor(x.cat),
+          color,
           todaySec: 0,
           totalSec: 0,
           sessions: 0,
           last: "—",
           done: false,
         });
+        // Mirror into today's calendar (0:00 until measured).
+        void teAccumulate(today, x.name, x.cat, color, 0);
       }
       return [...ts, ...add];
     });
