@@ -92,7 +92,17 @@ export async function teDelete(id: string): Promise<void> {
 /** Wire up category persistence. Call once on startup. No demo data is seeded —
  *  tasks and measured history start empty and accumulate from real usage. */
 export async function initData(): Promise<void> {
-  await getDb();
+  const db = await getDb();
+  // Cleanup for installs upgraded from v0.4.x: those builds seeded a demo
+  // history (source='seed'). The seeding code is gone, but the rows lingered in
+  // the DB across updates and made the calendar/stats show fake sessions that
+  // don't match the (real) main task list. Remove them so the calendar only ever
+  // reflects the user's own measured sessions. Idempotent — a no-op once purged.
+  try {
+    await db.execute("DELETE FROM time_entries WHERE source = $1", ["seed"]);
+  } catch {
+    /* ignore */
+  }
   registerCatPersist(saveCategories);
   const cats = await loadCategories();
   if (cats) hydrateCategories(cats);
