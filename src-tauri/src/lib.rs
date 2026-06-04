@@ -71,6 +71,14 @@ fn set_close_to_tray(state: State<'_, CloseToTray>, keep: bool) {
     }
 }
 
+/// Write a UTF-8 text file to a user-chosen path (from the save dialog). Used by
+/// the Stats CSV export; writing via a command avoids the fs plugin's path-scope
+/// restrictions for an arbitrary destination the user picked.
+#[tauri::command]
+fn write_file(path: String, contents: String) -> Result<(), String> {
+    std::fs::write(&path, contents).map_err(|e| e.to_string())
+}
+
 /// Re-register the global start/stop shortcut from the current settings.
 /// Called by the frontend whenever the user changes the combo or toggles it.
 #[cfg(desktop)]
@@ -124,7 +132,9 @@ pub fn run() {
                 .add_migrations("sqlite:timetracker.db", migrations)
                 .build(),
         )
-        .plugin(tauri_plugin_notification::init());
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init());
 
     #[cfg(desktop)]
     {
@@ -152,6 +162,7 @@ pub fn run() {
             show_main_window,
             quit_app,
             set_close_to_tray,
+            write_file,
             update_global_shortcut
         ])
         .setup(|app| {

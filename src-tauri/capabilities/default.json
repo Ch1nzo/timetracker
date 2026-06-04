@@ -27,6 +27,10 @@
     "autostart:allow-enable",
     "autostart:allow-disable",
     "autostart:allow-is-enabled",
-    "global-shortcut:default"
+    "global-shortcut:default",
+    "dialog:default",
+    "dialog:allow-save",
+    "opener:default",
+    "opener:allow-reveal-item-in-dir"
   ]
 }

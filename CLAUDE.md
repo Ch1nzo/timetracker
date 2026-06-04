@@ -9,6 +9,7 @@ Claude Design ハンドオフ（Task Timer ①メイン・方向B）を忠実に
 |---|---|
 | ブラウザで UI 開発（Tauri API は no-op） | `npm run dev`（port 1420 固定・strictPort） |
 | 型チェック + フロントビルド（ローカル検証はこれ） | `npm run build`（= `tsc --noEmit && vite build`） |
+| タイマー中核のユニットテスト（純粋ロジック） | `npm test`（`src/lib/timer.ts` を CJS にコンパイルし `tests/timer.test.cjs` を実行） |
 | ネイティブ起動 | `npm run tauri:dev` |
 | ネイティブビルド | `npm run tauri:build` |
 
@@ -37,8 +38,9 @@ Claude Design ハンドオフ（Task Timer ①メイン・方向B）を忠実に
 - DB ハンドルは `getDb()` シングルトン経由のみ。SQL プレースホルダは `$1, $2` 形式
 
 ### 計測は wall-clock 基準（tick カウント禁止）
+- 計測の純粋ロジックは **`src/lib/timer.ts` の `computeTimer()`**（React/Tauri/DB 非依存）。App.tsx の `syncTimer()` はこれを呼んで副作用（state/SQLite）を適用するだけ。**計測ロジックを App.tsx に書き戻さない** — `timer.ts` に置けば `npm test` で検証できる
 - 計測は `startedAtRef`（セッション開始の epoch）からの `Date.now()` 差分で導出する。**`+1` で秒を数える方式に戻さない** — トレイ格納中は WebView2 がタイマーをスロットリングし、tick 方式だと計測が大幅に過少になる
-- `syncTimer()` が唯一の前進ロジック: 1秒 interval（計測中）＋ 30秒 interval（常時、深夜跨ぎ保険）＋ `visibilitychange`/`focus`（トレイ復帰時の即時再同期）で呼ばれる。`todayDateRef` で深夜 0時に `todaySec` をリセットし、跨ぎセッションは `daySegments()` で日別に分割して `time_entries` へ記録する
+- `syncTimer()` は 1秒 interval（計測中）＋ 30秒 interval（常時、深夜跨ぎ保険）＋ `visibilitychange`/`focus`（トレイ復帰時の即時再同期）で呼ばれる。`computeTimer` が `todayDate` 比較で深夜 0時に `todaySec` をリセットし、跨ぎセッションは `daySegments()` で日別に分割して `time_entries` へ記録する
 - 起動時の復元: 実行中セッションは `startedAt` を保ったまま再開し `syncTimer` がオフライン分を清算。オフラインが `>= 86400` 秒なら `savedAt` までを確定して停止（古い計測を継続しない）
 
 ### 永続化の流れ（App.tsx）
@@ -55,6 +57,8 @@ Claude Design ハンドオフ（Task Timer ①メイン・方向B）を忠実に
 - **plugin 登録順**: `tauri_plugin_single_instance` を最初に登録（`#[cfg(desktop)]` 内）。順序を変えると多重起動ガードが壊れる
 - 新しい `#[tauri::command]` は `generate_handler![]` への追加も必須（片方だけだと invoke が実行時に失敗）
 - フロントから新しい plugin / window API を呼ぶ場合は `src-tauri/capabilities/default.json` に permission 追加が必須
+- 登録済み plugin: sql / notification / dialog / opener（全プラットフォーム）+ desktop 専用群。CSV 保存は `dialog`（保存先選択）→ 独自コマンド `write_file`（std::fs で任意パスへ書き込み。fs plugin の scope 制約回避）→ `opener` の `revealItemInDir` で OS ファイラを開く、の流れ（`src/lib/tauri.ts` の `saveTextFile`）
+- **`tauri.conf.json` の window `dragDropEnabled: false` を維持**（true だと webview の HTML5 ドラッグ&ドロップを Tauri が横取りし、カレンダーの記録移動・カテゴリ並べ替えが動かなくなる）
 - desktop 専用 plugin（global-shortcut / updater / process / autostart / single-instance）は `#[cfg(desktop)]` と Cargo.toml の target 指定 deps のゲートを維持する
 - **CloseRequested**: 既定（`trayKeepRunning` = true）は `prevent_close()` + `hide()`（トレイ格納）。`set_close_to_tray(false)` が来ている場合は `prevent_close()` + `emit("app-quit-requested")` し、フロント（`doQuit`）が実行中セッションを flush → `quit_app` で終了する。`CloseToTray(Mutex<bool>)` を `manage()` し、フロントが設定変更時に `set_close_to_tray` で同期する（generate_handler 登録済み）
 - 本当の終了はトレイメニューの quit（`app.exit(0)`）または上記 `quit_app` のみ
@@ -72,7 +76,7 @@ Claude Design ハンドオフ（Task Timer ①メイン・方向B）を忠実に
 
 ## バージョンアップ手順
 
-バージョンは **4 箇所** + git タグを一致させる（現在 0.5.0）:
+バージョンは **4 箇所** + git タグを一致させる（現在 0.5.1）:
 
 1. `package.json` の `version`
 2. `src-tauri/tauri.conf.json` の `version`
@@ -81,8 +85,11 @@ Claude Design ハンドオフ（Task Timer ①メイン・方向B）を忠実に
 
 ## リリース（GitHub Actions）
 
-- `git tag vX.Y.Z && git push origin vX.Y.Z` → `.github/workflows/release.yml` が起動（macOS arm64 / x64、Linux、Windows NSIS のマトリクス）
-- リリースは **draft** として作成される → CI 成功後に GitHub Releases で手動 Publish する（しないと updater の `latest.json` が解決せず自動更新が動かない）
+> 人間がたどれる手順書は **`docs/RELEASING.md`**。以下は要点。
+
+- `git tag vX.Y.Z && git push origin vX.Y.Z` → `.github/workflows/release.yml` が起動。3段構成: **create-release（draft + 変更点自動生成）→ build マトリクス（macOS arm64/x64 dmg、Linux **AppImage のみ**、Windows NSIS）→ publish（全ビルド成功後に draft 解除＝自動公開）**
+- assets は「インストーラ + updater 必須ファイル（`latest.json` / `.sig` / mac `.app.tar.gz`）+ source」に絞る方針。Linux は **AppImage のみ**（deb/rpm は出さない）。bundle 形式を増やす場合は `release.yml` の matrix `args` の `--bundles` を編集
+- ネイティブ実コンパイル検証用に **`build-check.yml`**（PR / `release/**` push でビルドのみ、リリースは作らない）。`npm test`（timer 中核）も CI で実行
 - CI は `npm ci` — `package.json` を変えたら `package-lock.json` も必ず更新する
 - アップデータ endpoint: `https://github.com/Ch1nzo/timetracker/releases/latest/download/latest.json`（リポジトリの owner / 名称を変えたら `tauri.conf.json` も要更新）
 

@@ -22,8 +22,8 @@ jobs:
         include:
           - platform: windows-latest # the primary target (NSIS .exe)
             args: "--bundles nsis"
-          - platform: ubuntu-22.04
-            args: ""
+          - platform: ubuntu-22.04 # AppImage only (matches release.yml)
+            args: "--bundles appimage"
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -59,6 +59,9 @@ jobs:
 
       - name: Install frontend dependencies
         run: npm ci
+
+      - name: Run timer core tests
+        run: npm test
 
       # Build (compile + bundle) without creating a release. Signing keys are
       # provided so the updater artifacts (createUpdaterArtifacts) sign exactly

@@ -741,6 +741,11 @@
 .tt-cal-nav button:hover { background: var(--muted); color: var(--foreground); }
 .tt-cal-nav button svg { width: 16px; height: 16px; }
 .tt-cal-period { font-size: 14px; font-weight: 600; min-width: 96px; text-align: center; }
+.tt-cal-range { display: flex; align-items: center; gap: 6px; }
+.tt-cal-range .tt-datefield { padding: 4px 8px; }
+.tt-cal-range .tt-datefield input { font-size: 12px; }
+.tt-cal-range .dash { color: var(--muted-foreground); font-size: 12px; }
+.tt-csv-msg { margin-top: 8px; text-align: center; font-size: 12px; color: var(--muted-foreground); }
 .tt-cal-today {
   font-family: inherit; font-size: 11.5px; font-weight: 500; color: var(--muted-foreground);
   background: var(--card); border: 1px solid var(--border); border-radius: 999px;
