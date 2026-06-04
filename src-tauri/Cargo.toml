@@ -1,6 +1,6 @@
 [package]
 name = "timetracker"
-version = "0.5.3"
+version = "0.5.4"
 description = "TimeTracker — a focus-hero desktop time tracker"
 authors = ["Ch1nzo"]
 edition = "2021"

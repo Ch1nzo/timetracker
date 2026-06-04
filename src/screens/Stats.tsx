@@ -209,7 +209,7 @@ export function Stats({ onClose }: { onClose: () => void }) {
                 <b>{taskList.length}</b> タスク
               </div>
               <div>
-                <b>{rows.length}</b> セッション
+                <b>{rows.length}</b> 記録
               </div>
             </div>
           </div>
