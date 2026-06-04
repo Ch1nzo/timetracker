@@ -1,0 +1,14 @@
+/* Tailwind v4 — utilities + theme only.
+ *
+ * Preflight (Tailwind's global base reset) is INTENTIONALLY excluded so it does
+ * not override the hand-crafted design that is the source of truth in
+ * app.css / window.css / colors_and_type.css. Tailwind utility classes are
+ * available for new markup; existing styles are left untouched.
+ *
+ * If a future component needs Tailwind to win over an existing rule, scope it or
+ * use an explicit utility — do not add preflight back without reviewing the
+ * whole design, since it resets margins/borders/box-sizing globally. */
+@layer theme, base, components, utilities;
+
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);

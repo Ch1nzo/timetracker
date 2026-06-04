@@ -1,118 +1,85 @@
 # TimeTracker
 
-フォーカス型のデスクトップ作業時間トラッカー。大きなタイマーで「いま何に取り組んでいるか」に集中し、トレイ常駐で裏でも計測、グローバルショートカットで素早く開始/停止。カレンダーと集計でふりかえりまで。
+**作業時間をシンプルに記録する、フォーカス型のデスクトップアプリ。**
 
-Claude Design の HTML/CSS/JS モック（`Task Timer — ①メイン（方向B）`）を、**Tauri v2 + React + TypeScript + Vite** のネイティブアプリとして実装したものです。
+大きなタイマーで「いま何に取り組んでいるか」に集中。ウィンドウを閉じてもトレイで計測を続け、グローバルショートカットで他のアプリを使いながらでも開始/停止。1日の終わりにはカレンダーと集計でふりかえりができます。
 
-## 主な機能
+Windows・macOS・Linux 対応。データはすべて**あなたのパソコンの中だけ**に保存されます（クラウド送信なし）。
 
-- **メイン（方向B）** — 大型タイマー Hero、今日のタスク一覧、ライブ計測表示
-- **キーボード操作** — `Space` 開始/停止 · `↑↓` 選択 · `1–9` 即切替 · `Ctrl+N` 新規 · `/` 絞り込み
-- **朝の準備 / ルーティン管理** — よく使うタスクをテンプレ化してワンタップ投入
-- **タスク編集** — 名前・カテゴリ・今日/累計時間の手動調整（+15/+30/+1h 追記）
-- **カレンダー** — 月/週ビュー、ドラッグで別日へ移動、タップで編集
-- **集計** — カテゴリ別ドーナツ、タスク別ランキング、日別推移、CSV エクスポート
-- **繰り越しダイアログ** — 未完了タスクを翌日へ
-- **設定** — リマインド間隔/時刻、起動・常駐、テーマ（ダーク/ライト・アクセント色）、カテゴリ管理
-- **トレイ常駐** — ウィンドウを閉じても裏で計測継続。トレイから表示/開始停止/終了
-- **グローバルショートカット** — 既定 `Ctrl+Alt+S` で他アプリ作業中でも開始/停止
-- **自動アップデート** — GitHub Releases の `latest.json` を参照して署名付き更新
-- **ローカル保存** — SQLite（`tauri-plugin-sql`）。計測した実セッションは `time_entries` に記録され、カレンダー/集計はそこから集計
+---
 
-## 技術スタック
+## 📥 ダウンロード
 
-| 層 | 採用 |
+[**最新版をダウンロード**](https://github.com/Ch1nzo/timetracker/releases/latest) → お使いの OS のファイルを選んでください。
+
+| OS | ファイル | インストール |
+| --- | --- | --- |
+| **Windows** | `TimeTracker_x.y.z_x64-setup.exe` | ダブルクリックして指示に従う |
+| **macOS** | `TimeTracker_x.y.z_x64.dmg`（Intel）/ `_aarch64.dmg`（Apple Silicon） | 開いて Applications へドラッグ |
+| **Linux** | `TimeTracker_x.y.z_amd64.AppImage` | `chmod +x` で実行権限を付けて起動 |
+
+> ℹ️ 個人開発のため OS の発行元署名は付けていません。初回起動時に警告が出る場合は次で回避できます。
+> - **Windows**: 「WindowsによってPCが保護されました」→ 「詳細情報」→ 「実行」
+> - **macOS**: アプリを右クリック →「開く」→ ダイアログで「開く」
+>
+> アップデートの署名（改ざん検知）は別途行われており、自動更新は安全に検証されます。
+
+---
+
+## ✨ できること
+
+- **大きなタイマーで集中** — 今やっている作業を 1 つ選んで計測。経過時間が一目でわかります。
+- **トレイで計測を継続** — ウィンドウを閉じてもアプリはトレイに常駐し、裏で計測し続けます（設定でオフにすると、閉じたときに終了します）。
+- **どこからでも開始/停止** — グローバルショートカット（既定 `Ctrl+Alt+S`）で、他のアプリで作業中でも切り替え。
+- **朝の準備とルーティン** — よく使う作業をテンプレート登録し、ワンタップで今日のタスクに追加。
+- **カレンダー** — 月/週ビューで毎日の記録を確認。ドラッグで別の日へ移動、タップで編集。
+- **集計とふりかえり** — カテゴリ別の円グラフ、タスク別ランキング、日別の推移。期間（日/週/月/自由指定）を選んで **CSV に書き出し**（保存後はフォルダが開きます）。
+- **やさしいリマインド** — 一定間隔で「○分経過」をそっと通知。
+- **繰り越し** — 未完了のタスクを翌日へ。
+- **テーマ** — ダーク/ライト、アクセントカラーを選択。
+- **自動アップデート** — 新しいバージョンが出ると、アプリ内のお知らせから更新できます。
+
+---
+
+## 🚀 使い方（クイックスタート）
+
+1. **タスクを追加** — 「新規」または朝の準備から、今日やることを入れます。
+2. **開始** — タスクを選んで `Space`（または「開始」ボタン）。タイマーが動き出します。
+3. **そのまま作業** — ウィンドウは閉じて OK。トレイに入って計測を続けます。`Ctrl+Alt+S` で停止も可能。
+4. **ふりかえる** — 下部の **カレンダー**で日々の記録を、**集計**で割合や推移を確認。必要なら CSV に書き出し。
+
+### ⌨️ キーボードショートカット（メイン画面）
+
+| キー | 動作 |
 | --- | --- |
-| シェル | Tauri v2（frameless 460×680・透過・カスタムタイトルバー） |
-| UI | React 18 + TypeScript + Vite 6 |
-| スタイル | shadcn/ui トークン（oklch）・Geist / Noto Sans JP |
-| データ | SQLite（`tauri-plugin-sql`、マイグレーションは Rust 側で定義） |
-| 常駐/操作 | tray-icon・`tauri-plugin-global-shortcut`・`tauri-plugin-autostart`・`tauri-plugin-notification` |
-| 更新 | `tauri-plugin-updater`（+ `tauri-plugin-process` で再起動） |
+| `Space` | 開始 / 停止 |
+| `↑` `↓` | タスクを選択 |
+| `1`–`9` | その番号のタスクに即切り替えて開始 |
+| `Ctrl/Cmd + N` | 新しいタスクを追加 |
+| `/` | タスクを絞り込み |
+| `Ctrl + Alt + S` | （アプリ外でも）開始 / 停止 |
 
-## ディレクトリ
+---
 
-```
-src/
-  App.tsx               メイン画面 + 画面遷移 + 計測ロジック + OS 連携
-  lib/                  db(SQLite) / categories / data / format / icons / tauri / types
-  components/           TitleBar / StatusBar / Footer / MiniLive / Category(Picker|Manager)
-  screens/              MorningFlow / RoutineManager / TaskEditor / Settings / Calendar / Stats / CarryoverDialog
-  styles/               app.css / colors_and_type.css（デザインのソース・オブ・トゥルース） + fonts
-src-tauri/              Rust バックエンド（tray・shortcut・SQLite マイグレーション・close→tray）
-.github/workflows/      release.yml（tauri-action による各 OS ビルド & Release 公開）
-scripts/generate-icon.mjs  アプリアイコン生成（依存なし）
-```
+## 🔒 プライバシー
 
-## 開発
+記録した作業時間はすべて、あなたのパソコンのローカルデータベースにのみ保存されます。外部サーバーへの送信やアカウント登録はありません。アップデートの確認時のみ GitHub に接続します。
 
-```bash
-npm install
-npm run tauri:dev     # ネイティブ起動（Rust ビルドにシステム依存が必要 / 下記参照）
-# もしくはブラウザで UI だけ確認（OS 連携は no-op になる）
-npm run dev
-```
+---
 
-`npm run dev` はブラウザでも動作し、Tauri API は安全に no-op 化されるため UI レビューに使えます（保存・トレイ・通知・更新はネイティブ起動時のみ）。
+## 🛠 開発者向け
 
-### ネイティブビルドのシステム依存
+ソースから動かしたい・貢献したい方へ:
 
-Tauri のネイティブビルドには各 OS の WebView 開発ライブラリが必要です。
+- 技術構成: **Tauri v2 + React 18 + TypeScript + Vite + SQLite**
+- ブラウザで UI を確認: `npm install && npm run dev`（Tauri API は no-op）
+- 型チェック + ビルド: `npm run build` / ロジックのテスト: `npm test`
+- ネイティブ起動/ビルド: `npm run tauri:dev` / `npm run tauri:build`（各 OS の WebView 開発ライブラリが必要）
+- リリース手順: [`docs/RELEASING.md`](docs/RELEASING.md)
+- 開発ルール・設計メモ: [`CLAUDE.md`](CLAUDE.md)
 
-- **Windows**: WebView2（多くの環境で同梱済み）+ Visual Studio C++ Build Tools
-- **macOS**: Xcode Command Line Tools
-- **Linux / WSL2 (Ubuntu)**:
-  ```bash
-  sudo apt-get update
-  sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
-    libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libgtk-3-dev
-  ```
-  ※ WSL2 で GUI を表示するには WSLg（Windows 11）または X サーバが必要です。
+デザインは Claude Design のハンドオフ（`Task Timer — ①メイン（方向B）`）を再現。視覚仕様のソース・オブ・トゥルースは `src/styles/` です。
 
-```bash
-npm run tauri:build   # インストーラ生成（Windows は NSIS .exe / mac は .dmg / Linux は AppImage・deb）
-```
+---
 
-## GitHub でのリリースと自動アップデート
-
-ビルドは GitHub Actions（`.github/workflows/release.yml`）で各 OS ランナー上で行います。**バージョンタグを push すると** 全 OS のインストーラと updater マニフェスト（`latest.json`）が GitHub Release（下書き）として公開されます。
-
-### 1. 署名鍵（生成済み）
-
-更新の署名には minisign 鍵ペアを使います。本リポジトリには**公開鍵のみ** `src-tauri/tauri.conf.json` の `plugins.updater.pubkey` に埋め込み済みです。秘密鍵はローカルの `~/.tauri/timetracker.key`（リポジトリ外）にあります。
-
-> 鍵を再生成する場合: `npx tauri signer generate -w ~/.tauri/timetracker.key -p "" --ci -f`
-> 出力された公開鍵（`~/.tauri/timetracker.key.pub` の内容）を `pubkey` に設定してください。
-
-### 2. リポジトリ Secrets を設定
-
-| Secret | 値 |
-| --- | --- |
-| `TAURI_SIGNING_PRIVATE_KEY` | `~/.tauri/timetracker.key` の中身 |
-| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | 鍵のパスワード（本構成では空文字） |
-
-```bash
-gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/timetracker.key
-gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD --body ""
-```
-
-### 3. updater のエンドポイント
-
-`src-tauri/tauri.conf.json` の更新先は以下です。**GitHub の owner/repo に合わせて必要なら修正**してください。
-
-```
-https://github.com/Ch1nzo/timetracker/releases/latest/download/latest.json
-```
-
-### 4. リリースを実行
-
-```bash
-git tag v0.4.0
-git push origin v0.4.0      # → Actions が起動し、Release（下書き）に各 OS のインストーラを添付
-```
-
-ワークフロー完了後、GitHub の Releases で内容を確認して **Publish**。以後、起動済みの TimeTracker は次回チェック時に新バージョンを検出し、ダウンロード→署名検証→再起動で更新します（設定 → アプリ情報 → 「アップデートを確認」で手動チェックも可能）。
-
-## デザイン出典
-
-`timetracker-handoff.zip`（Claude Design からのエクスポート）。視覚仕様（寸法・色・レイアウト）は `src/styles/app.css` / `colors_and_type.css` をソース・オブ・トゥルースとして再現しています。
+<sub>ライセンス未設定（個人プロジェクト）。要望・不具合は GitHub Issues へ。</sub>

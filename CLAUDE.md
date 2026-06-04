@@ -73,10 +73,11 @@ Claude Design ハンドオフ（Task Timer ①メイン・方向B）を忠実に
 - サブ画面は `.tt-overlay` レイアウト規約（`.tt-ov-head` + 戻るボタン / `.tt-ov-body` / `.tt-ov-foot`、`onClose` prop）
 - タイトルバーのドラッグは `data-tauri-drag-region` 属性 +（capabilities の `core:window:allow-start-dragging`）で成立している
 - Vite 設定の変更禁止項目: port 1420 / strictPort / `assetsInlineLimit: 4096`（約 5MB の Noto Sans JP を inline させないため）
+- **Tailwind v4 導入済み**（`@tailwindcss/vite` プラグイン + `src/styles/tailwind.css`）。ただし **preflight（全体リセット）は意図的に除外**（theme + utilities のみ）— 手書きデザインを壊さないため。`tailwind.css` に preflight を戻さない。Tailwind utility は新規マークアップ向けで、既存 `.tt-*` スタイル（unlayered）が優先される。ビジュアルの正は引き続き `src/styles/`
 
 ## バージョンアップ手順
 
-バージョンは **4 箇所** + git タグを一致させる（現在 0.5.1）:
+バージョンは **4 箇所** + git タグを一致させる（現在 0.5.2）:
 
 1. `package.json` の `version`
 2. `src-tauri/tauri.conf.json` の `version`

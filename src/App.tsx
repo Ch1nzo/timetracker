@@ -27,7 +27,7 @@ import {
 import type { Note, Routine, Settings, Task, TimeEntry } from "./lib/types";
 import { computeTimer, daySegments, type DaySeg } from "./lib/timer";
 
-const APP_VERSION = "0.5.1";
+const APP_VERSION = "0.5.2";
 
 import { TitleBar } from "./components/TitleBar";
 import { StatusBar } from "./components/StatusBar";
