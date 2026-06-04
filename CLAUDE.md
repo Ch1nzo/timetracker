@@ -77,7 +77,7 @@ Claude Design ハンドオフ（Task Timer ①メイン・方向B）を忠実に
 
 ## バージョンアップ手順
 
-バージョンは **4 箇所** + git タグを一致させる（現在 0.5.2）:
+バージョンは **4 箇所** + git タグを一致させる（現在 0.5.3）:
 
 1. `package.json` の `version`
 2. `src-tauri/tauri.conf.json` の `version`
