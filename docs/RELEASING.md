@@ -90,7 +90,7 @@ git push origin vX.Y.Z
 `v*` タグの push で `.github/workflows/release.yml` が起動し、**3 段**で進む:
 
 1. **create-release** — draft リリースを作成し、**変更点（What's Changed）を自動生成**
-2. **build** — macOS(arm64/x64 dmg) / Linux(AppImage) / Windows(NSIS .exe) を並列ビルドして添付（署名付き updater 成果物 + `latest.json` 含む）
+2. **build** — macOS(arm64/x64 dmg) / Linux(AppImage) / Windows(NSIS .exe) を**逐次**ビルドして添付（署名付き updater 成果物 + `latest.json` 含む）。`max-parallel: 1` で 1 ジョブずつ実行する＝各ジョブが直前の完全な `latest.json` に自分のプラットフォームを追記できる。並列だと共有 `latest.json` の同時更新が競合し（`ReleaseAsset already_exists`）、エントリが欠落する（v0.5.5 で発生）。その代わり所要時間は長め（4 OS 逐次で ~30 分前後）
 3. **publish** — **全ビルド成功後に draft を解除＝自動公開**（どれか失敗すると draft のまま＝公開されない）
 
 進捗の確認:
@@ -136,6 +136,7 @@ curl -sL https://github.com/Ch1nzo/timetracker/releases/latest/download/latest.j
 - **draft のまま公開されない** → どれかの build が失敗。`gh run view <id> --log-failed` で原因を見て修正し、同じタグを貼り直す（`git tag -f vX.Y.Z && git push -f origin vX.Y.Z`）か番号を上げて再実行。
 - **`npm ci` が CI で失敗** → `package.json` を変えたら `package-lock.json` も commit すること。
 - **自動更新が出ない** → リリースが draft のまま／`latest.json` 未添付／`tauri.conf.json` の updater endpoint や `pubkey` が不一致。endpoint は `github.com/Ch1nzo/timetracker`。
+- **特定 OS だけ更新が出ない（`latest.json` のプラットフォーム欠落）** → `max-parallel: 1` 導入前の並列ビルドで起きた共有 `latest.json` の同時更新競合の名残。再ビルド不要で手動補完できる（成果物の `.sig` は正規）。欠けている OS の `.app.tar.gz.sig`（mac）等を `gh release download vX.Y.Z --pattern '<name>.sig'` で取得し、その**ファイル内容をそのまま** `latest.json` の該当プラットフォームの `signature` に、`url` を `releases/latest/download/<アセット名>` にして追記 → `gh release upload vX.Y.Z latest.json --clobber` → draft なら `gh release edit vX.Y.Z --draft=false`。プラットフォームキーは公開済み旧バージョンの `latest.json` を雛形にする（mac は `darwin-aarch64` / `darwin-aarch64-app` / `darwin-x86_64` / `darwin-x86_64-app` の 4 つ）。
 - **assets を手で減らしたい**（公開済みリリース）:
   ```bash
   gh release delete-asset vX.Y.Z <ファイル名> --yes
