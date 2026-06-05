@@ -60,6 +60,15 @@ jobs:
     needs: create-release
     strategy:
       fail-fast: false
+      # Serialize the matrix. tauri-action uploads each platform's entry into a
+      # SHARED latest.json on the release (merge-on-upload). Running jobs in
+      # parallel races that update — concurrent jobs (notably the two macOS
+      # targets on the same runner type, which finish near-simultaneously) hit
+      # GitHub's "ReleaseAsset already_exists" and silently drop each other's
+      # platform entry, leaving an incomplete updater manifest. One job at a
+      # time means each appends to the previous complete latest.json. Slower
+      # wall-clock, but the manifest is always complete (this bit v0.5.5).
+      max-parallel: 1
       matrix:
         include:
           - platform: macos-latest # Apple Silicon
