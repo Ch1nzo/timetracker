@@ -45,7 +45,7 @@ Claude Design ハンドオフ（Task Timer ①メイン・方向B）を忠実に
 
 ### 永続化の流れ（App.tsx）
 - 作業セット（tasks / settings / runningKey / sessionSec / startedAt / todayDate など）は **400ms デバウンスの単一 effect** が `saveMain()` する。個別の saveMain 呼び出しを追加しない（例外: 終了時の `doQuit` が即時 flush）
-- 計測セッションを `time_entries` に追加するのは `logRunning()`/`logRange()` のみ（停止時・タスク切替時・深夜跨ぎ flush・繰り越し/終了時の flush）。毎秒の tick 相当はメモリ上のカウンタ更新だけで DB には書かない。このほか time_entries に触るのは Calendar 画面の編集（`teMove` / `teUpdate` / `teDelete`、楽観更新 = state 更新後に `void` で fire-and-forget）のみ。**初回起動はダミー履歴なし**（タスク一覧も空。ルーティン/カテゴリのプリセットのみ残す）
+- 計測セッションを `time_entries` に書くのは `writeSegments()`（`logRunning()`/`logRange()` 経由）で、1タスク×1日＝1行に **`teAccumulate` で加算 upsert**（停止時・タスク切替時・深夜跨ぎ flush・終了時の flush）。毎秒の tick 相当はメモリ上のカウンタ更新だけで DB には書かない。**当日のメイン一覧とカレンダーは同一データ**: タスク追加 (`addTask`/`addManyTasks`) は当日に 0 秒行を `teAccumulate`、削除 (`del`) は当日行を `teDeleteTaskDay`、繰り越し (`carryMove` → `planCarryover`) は翌日に 0 秒行を作り当日の 0 秒行を削除。メイン画面復帰時は `reconcileTodayTasks` が当日 `time_entries` と一覧を突合（純粋ロジック・`npm test`）。このほか time_entries に触るのは Calendar 画面の編集（`teMove` / `teUpdate` / `teDelete`、楽観更新 = state 更新後に `void` で fire-and-forget）のみ。**初回起動はダミー履歴なし**（タスク一覧も空。ルーティン/カテゴリのプリセットのみ残す）
 - settings は `{...DEFAULT_SETTINGS, ...saved}` でマージ（新デフォルトが生きる）
 
 ### カテゴリストア（categories.ts）
@@ -77,7 +77,7 @@ Claude Design ハンドオフ（Task Timer ①メイン・方向B）を忠実に
 
 ## バージョンアップ手順
 
-バージョンは **4 箇所** + git タグを一致させる（現在 0.5.3）:
+バージョンは **4 箇所** + git タグを一致させる（現在 0.5.5）:
 
 1. `package.json` の `version`
 2. `src-tauri/tauri.conf.json` の `version`
