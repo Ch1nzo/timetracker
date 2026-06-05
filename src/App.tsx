@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Update } from "@tauri-apps/plugin-updater";
 
 import { Ico } from "./lib/icons";
-import { hhmm, hm, hms, nowHM, ymd } from "./lib/format";
+import { addDays, hhmm, hm, hms, nowHM, ymd } from "./lib/format";
 import { catColor } from "./lib/categories";
 import { DEFAULT_SETTINGS, ROUTINES_SEED } from "./lib/data";
 import {
@@ -28,9 +28,9 @@ import {
 } from "./lib/tauri";
 import type { Note, Routine, Settings, Task } from "./lib/types";
 import { computeTimer, daySegments, type DaySeg } from "./lib/timer";
-import { reconcileTodayTasks } from "./lib/tasks";
+import { planCarryover, reconcileTodayTasks } from "./lib/tasks";
 
-const APP_VERSION = "0.5.4";
+const APP_VERSION = "0.5.5";
 
 import { TitleBar } from "./components/TitleBar";
 import { StatusBar } from "./components/StatusBar";
@@ -81,7 +81,6 @@ export function App() {
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
   const [newCat, setNewCat] = useState("未分類");
-  const [toast, setToast] = useState(false);
   const [note, setNote] = useState<Note | null>(null);
   const [showCarry, setShowCarry] = useState(false);
   const [flashKey, setFlashKey] = useState<string | null>(null);
@@ -327,7 +326,8 @@ export function App() {
     }
 
     if (r.fireReminder) {
-      setToast(true);
+      // In-app toast removed per request; the reminder is delivered as the
+      // OS-standard notification only.
       const t = tasksRef.current.find((x) => x.k === runKey);
       void notify(t?.name ?? "計測中", `${r.reminderMinutes}分が経過しました`);
     }
@@ -550,7 +550,15 @@ export function App() {
   const carryMove = (keys: string[]) => {
     const set = new Set(keys);
     if (runningKey && set.has(runningKey)) stop(); // flush before dropping the task
+    const today = ymd(new Date());
+    const tomorrow = addDays(today, 1);
+    const plan = planCarryover(tasksRef.current, keys);
     setTasks((ts) => ts.filter((t) => !set.has(t.k)));
+    // Apply the carryover plan: create tomorrow's 0:00 rows (so the task shows on
+    // tomorrow's calendar and main list) and drop empty today rows. See
+    // planCarryover for the rationale.
+    for (const c of plan.carry) void teAccumulate(tomorrow, c.name, c.cat, c.color, 0);
+    for (const name of plan.dropToday) void teDeleteTaskDay(today, name);
     setShowCarry(false);
     flashNote(`${keys.length} 件を明日へ繰り越しました`);
     void hideToTray();
@@ -615,7 +623,6 @@ export function App() {
         setQuery("");
         setAdding(false);
         setNewName("");
-        setToast(false);
         return;
       }
       if (screen !== "main" || editKey || typing) return;
@@ -677,17 +684,6 @@ export function App() {
 
   const toastStack = (
     <>
-      {toast && (
-        <div className="tt-toast">
-          <Ico n="bell" className="ti" />
-          <span>
-            {active ? active.name : "計測中"}・<b>{Math.floor(sessionSec / 60)}分</b>経過しています
-          </span>
-          <button className="x" onClick={() => setToast(false)}>
-            <Ico n="x" />
-          </button>
-        </div>
-      )}
       {note && (
         <div className="tt-toast">
           <Ico n={note.icon} className="ti" />

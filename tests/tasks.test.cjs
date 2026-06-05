@@ -2,7 +2,7 @@
 // compiled to CommonJS by `npm test`. Verifies the main task list converges with
 // today's measured calendar entries.
 const assert = require("node:assert/strict");
-const { reconcileTodayTasks } = require("../.ttbuild/tasks.js");
+const { reconcileTodayTasks, planCarryover } = require("../.ttbuild/tasks.js");
 
 const TODAY = "2026-06-04";
 const mkTask = (over) => ({
@@ -98,6 +98,47 @@ test("planned (unmeasured) task is kept as-is", () => {
   assert.ok(out.find((t) => t.name === "Planned"));
   assert.ok(out.find((t) => t.name === "A"));
   assert.equal(out.length, 2);
+});
+
+// --- carryover planning (planCarryover) --------------------------------
+// Moving an unfinished task to "tomorrow" must surface it on tomorrow's
+// calendar (and, via reconcile, tomorrow's main list). These guard that the
+// plan carries every selected task and only drops empty today rows.
+
+// 9) Every carried task gets a tomorrow row; planned (0-min) tasks drop today.
+test("carryover: planned task is carried to tomorrow and dropped from today", () => {
+  const tasks = [mkTask({ k: "t1", name: "報告書", cat: "業務", color: "#f59e0b", todaySec: 0 })];
+  const plan = planCarryover(tasks, ["t1"]);
+  assert.deepEqual(plan.carry, [{ name: "報告書", cat: "業務", color: "#f59e0b" }]);
+  assert.deepEqual(plan.dropToday, ["報告書"]); // never worked today → drop empty row
+});
+
+// 10) A task with real time today is carried forward but its history is kept.
+test("carryover: task worked today is carried but today's history is preserved", () => {
+  const tasks = [mkTask({ k: "t1", name: "開発", todaySec: 1800 })];
+  const plan = planCarryover(tasks, ["t1"]);
+  assert.equal(plan.carry.length, 1);
+  assert.equal(plan.carry[0].name, "開発");
+  assert.deepEqual(plan.dropToday, []); // todaySec > 0 → keep today's row
+});
+
+// 11) Only selected keys are carried; unselected tasks are untouched.
+test("carryover: only selected keys are carried", () => {
+  const tasks = [
+    mkTask({ k: "t1", name: "A", todaySec: 0 }),
+    mkTask({ k: "t2", name: "B", todaySec: 0 }),
+    mkTask({ k: "t3", name: "C", todaySec: 600 }),
+  ];
+  const plan = planCarryover(tasks, ["t1", "t3"]);
+  assert.deepEqual(plan.carry.map((c) => c.name).sort(), ["A", "C"]);
+  assert.deepEqual(plan.dropToday, ["A"]); // C has time today → not dropped
+});
+
+// 12) Carrying nothing is a no-op plan.
+test("carryover: empty selection yields an empty plan", () => {
+  const plan = planCarryover([mkTask({ k: "t1", todaySec: 0 })], []);
+  assert.deepEqual(plan.carry, []);
+  assert.deepEqual(plan.dropToday, []);
 });
 
 console.log(`\n${passed} passed`);

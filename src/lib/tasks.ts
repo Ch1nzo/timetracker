@@ -66,3 +66,30 @@ export function reconcileTodayTasks(
 
   return changed ? out : tasks;
 }
+
+/** Side effects of carrying the given task keys over to tomorrow. */
+export interface CarryoverPlan {
+  /** Tasks to place on tomorrow's calendar as 0:00 planned rows. */
+  carry: { name: string; cat: string; color: string }[];
+  /** Names whose (0-min) today row should be dropped — see below. */
+  dropToday: string[];
+}
+
+/** Decide what a "move to tomorrow" carryover writes.
+ *
+ *  - Every carried task gets a 0:00 row on tomorrow so it shows up tomorrow on
+ *    both the calendar and — via reconcileTodayTasks — the main task list.
+ *  - A carried task never worked on today (todaySec === 0) also has its empty
+ *    today row dropped, so the carryover "sticks" (reconcile won't resurrect it
+ *    onto today when the window reopens) and today's calendar isn't left with a
+ *    0-min entry. Tasks with real time logged today are preserved as history.
+ *
+ *  Pure + deterministic (no Date/DB) so it can be unit-tested. */
+export function planCarryover(tasks: Task[], keys: string[]): CarryoverPlan {
+  const set = new Set(keys);
+  const moved = tasks.filter((t) => set.has(t.k));
+  return {
+    carry: moved.map((t) => ({ name: t.name, cat: t.cat, color: t.color })),
+    dropToday: moved.filter((t) => t.todaySec === 0).map((t) => t.name),
+  };
+}
